@@ -1,9 +1,11 @@
 """Snake draft engine for mock drafts and live draft assistance."""
 
 import random
+from typing import Optional
 from src.models import (
     Player, Team, League, DraftPick, Position,
     RosterSlot, ROSTER_SLOTS, FLEX_ELIGIBLE, TOTAL_ROUNDS, RosterEntry,
+    StrategyConfig,
 )
 from src.rankings import (
     calculate_vbd, get_draft_recommendations,
@@ -41,8 +43,9 @@ def auto_assign_slot(player: Player, team: Team) -> RosterSlot:
 
 
 class DraftEngine:
-    def __init__(self, league: League):
+    def __init__(self, league: League, config: Optional[StrategyConfig] = None):
         self.league = league
+        self.config = config
         self.snake_order = generate_snake_order(len(league.teams), TOTAL_ROUNDS)
         self.current_round = 0
         self.current_pick_in_round = 0
@@ -77,10 +80,50 @@ class DraftEngine:
             self.current_round += 1
         return pick
 
+    def _apply_round_bias(self, recommendations: list[Player], team: Team) -> list[Player]:
+        """Apply round-based positional biases from config."""
+        if self.config is None:
+            return recommendations
+
+        current_round = self.current_round + 1  # 1-indexed
+
+        # Determine bias for current round
+        bias = "BPA"
+        if current_round <= 2:
+            bias = self.config.round_1_2_bias
+        elif current_round <= 5:
+            bias = self.config.round_3_5_bias
+
+        # Apply positional bias multipliers
+        scored = []
+        for player in recommendations:
+            adj = player.vbd_score
+            if bias == "RB_heavy" and player.position == Position.RB:
+                adj *= 1.2
+            elif bias == "WR_heavy" and player.position == Position.WR:
+                adj *= 1.2
+            scored.append((adj, player))
+
+        # QB target round: if haven't drafted QB by target round, boost QB
+        if current_round >= self.config.qb_target_round:
+            has_qb = any(e.player.position == Position.QB for e in team.roster)
+            if not has_qb:
+                scored = [(s * 1.3 if p.position == Position.QB else s, p) for s, p in scored]
+
+        # TE target round: if haven't drafted TE by target round, boost TE
+        if current_round >= self.config.te_target_round:
+            has_te = any(e.player.position == Position.TE for e in team.roster)
+            if not has_te:
+                scored = [(s * 1.3 if p.position == Position.TE else s, p) for s, p in scored]
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [p for _, p in scored]
+
     def ai_pick(self, team: Team) -> DraftPick:
         needs = team.needs()
         recommendations = get_draft_recommendations(
-            self.league.available_players, needs, num_recommendations=10
+            self.league.available_players, needs, num_recommendations=10,
+            config=self.config,
         )
         if not recommendations:
             available_sorted = sorted(
@@ -90,6 +133,7 @@ class DraftEngine:
             )
             pick_player = available_sorted[0] if available_sorted else None
         else:
+            recommendations = self._apply_round_bias(recommendations, team)
             top = recommendations[:3]
             weights = [3, 2, 1][:len(top)]
             pick_player = random.choices(top, weights=weights, k=1)[0]
@@ -99,7 +143,9 @@ class DraftEngine:
 
     def get_recommendations(self, team: Team, count: int = 5) -> list[Player]:
         needs = team.needs()
-        return get_draft_recommendations(self.league.available_players, needs, count)
+        return get_draft_recommendations(
+            self.league.available_players, needs, count, config=self.config,
+        )
 
     def get_position_best(self, position: Position, count: int = 5) -> list[Player]:
         return get_best_available_by_position(self.league.available_players, position, count)

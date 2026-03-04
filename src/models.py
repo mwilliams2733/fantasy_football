@@ -214,3 +214,46 @@ class League:
                 for dp in self.draft_picks
             ],
         }
+
+
+@dataclass
+class StrategyConfig:
+    """Tunable parameters for the VBD draft strategy."""
+    replacement_rank: dict = field(default_factory=lambda: {
+        Position.QB: 1,
+        Position.RB: 2.2,
+        Position.WR: 2.2,
+        Position.TE: 1.1,
+        Position.K: 1,
+        Position.DEF: 1,
+    })
+    need_boost: float = 1.15
+    scarcity_penalty: float = 0.8
+    round_1_2_bias: str = "BPA"
+    round_3_5_bias: str = "BPA"
+    qb_target_round: int = 6
+    te_target_round: int = 5
+
+    def to_dict(self) -> dict:
+        return {
+            "replacement_rank": {k.value: v for k, v in self.replacement_rank.items()},
+            "need_boost": self.need_boost,
+            "scarcity_penalty": self.scarcity_penalty,
+            "round_1_2_bias": self.round_1_2_bias,
+            "round_3_5_bias": self.round_3_5_bias,
+            "qb_target_round": self.qb_target_round,
+            "te_target_round": self.te_target_round,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StrategyConfig":
+        repl = {Position(k): v for k, v in data.get("replacement_rank", {}).items()}
+        return cls(
+            replacement_rank=repl if repl else cls().replacement_rank,
+            need_boost=data.get("need_boost", 1.15),
+            scarcity_penalty=data.get("scarcity_penalty", 0.8),
+            round_1_2_bias=data.get("round_1_2_bias", "BPA"),
+            round_3_5_bias=data.get("round_3_5_bias", "BPA"),
+            qb_target_round=data.get("qb_target_round", 6),
+            te_target_round=data.get("te_target_round", 5),
+        )

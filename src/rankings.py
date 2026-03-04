@@ -1,6 +1,7 @@
 """Value-Based Drafting (VBD) rankings engine."""
 
-from src.models import Player, Position, ROSTER_SLOTS, RosterSlot, FLEX_ELIGIBLE
+from typing import Optional
+from src.models import Player, Position, ROSTER_SLOTS, RosterSlot, FLEX_ELIGIBLE, StrategyConfig
 
 
 REPLACEMENT_RANK = {
@@ -13,24 +14,34 @@ REPLACEMENT_RANK = {
 }
 
 
-def get_replacement_level(players: list[Player], position: Position, num_teams: int = 12) -> float:
+def get_replacement_level(
+    players: list[Player],
+    position: Position,
+    num_teams: int = 12,
+    config: Optional[StrategyConfig] = None,
+) -> float:
     pos_players = sorted(
         [p for p in players if p.position == position],
         key=lambda p: p.fantasy_points,
         reverse=True,
     )
-    replacement_index = int(num_teams * REPLACEMENT_RANK[position])
+    rank_map = config.replacement_rank if config is not None else REPLACEMENT_RANK
+    replacement_index = int(num_teams * rank_map[position])
     if replacement_index >= len(pos_players):
         replacement_index = len(pos_players) - 1
     return pos_players[replacement_index].fantasy_points
 
 
-def calculate_vbd(players: list[Player], num_teams: int = 12) -> list[Player]:
+def calculate_vbd(
+    players: list[Player],
+    num_teams: int = 12,
+    config: Optional[StrategyConfig] = None,
+) -> list[Player]:
     replacement_levels: dict[Position, float] = {}
     for pos in Position:
         pos_players = [p for p in players if p.position == pos]
         if pos_players:
-            replacement_levels[pos] = get_replacement_level(players, pos, num_teams)
+            replacement_levels[pos] = get_replacement_level(players, pos, num_teams, config=config)
         else:
             replacement_levels[pos] = 0.0
     for player in players:
@@ -43,7 +54,11 @@ def get_draft_recommendations(
     available: list[Player],
     team_needs: list[RosterSlot],
     num_recommendations: int = 5,
+    config: Optional[StrategyConfig] = None,
 ) -> list[Player]:
+    need_boost = config.need_boost if config is not None else 1.15
+    scarcity_penalty = config.scarcity_penalty if config is not None else 0.8
+
     scored: list[tuple[float, Player]] = []
     need_positions = set()
     for slot in team_needs:
@@ -54,9 +69,9 @@ def get_draft_recommendations(
     for player in available:
         adj_score = player.vbd_score
         if player.position in need_positions:
-            adj_score *= 1.15
+            adj_score *= need_boost
         else:
-            adj_score *= 0.8
+            adj_score *= scarcity_penalty
         scored.append((adj_score, player))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [player for _, player in scored[:num_recommendations]]
