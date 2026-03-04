@@ -1,8 +1,10 @@
 """Fantasy Football Draft Tool & Team Manager."""
 
+from src.cli import main_menu
+
 
 def main():
-    print("Fantasy Football Draft Tool — starting...")
+    main_menu()
 
 
 if __name__ == "__main__":
