@@ -1,6 +1,7 @@
 """Rich CLI interface for Fantasy Football Draft Tool & Team Manager."""
 
 import sys
+from pathlib import Path
 
 import questionary
 from rich.console import Console
@@ -15,6 +16,7 @@ from src.models import (
     Position,
     RosterSlot,
     ProjectedStats,
+    StrategyConfig,
     TOTAL_ROUNDS,
 )
 from src.scoring import score_all_players
@@ -33,6 +35,13 @@ from src.team_manager import (
 )
 from src.waiver import get_waiver_recommendations
 from src.persistence import load_players, save_players, save_league, load_league, list_saves
+from src.data_scraper import scrape_season, scrape_preseason_adp, HISTORICAL_DIR
+from src.backtest import run_backtest, SeasonBacktestResults
+from src.strategy_tuner import run_tuning, generate_random_config, TunerResult
+from src.backtest_report import (
+    print_full_report, export_results_csv, export_tuning_csv,
+    format_before_after, format_tuning_results,
+)
 
 console = Console()
 
@@ -813,6 +822,289 @@ def save_load_league() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  7. Backtest & Strategy Lab
+# ═══════════════════════════════════════════════════════════════════════
+
+BACKTEST_RESULTS_DIR = Path(__file__).parent.parent / "data" / "backtest_results"
+
+
+def _backtest_lab() -> None:
+    """Submenu for backtesting and strategy tuning features."""
+    console.print(Panel("[bold]Backtest & Strategy Lab[/bold]", style="blue"))
+
+    while True:
+        action = questionary.select(
+            "Backtest & Strategy Lab:",
+            choices=[
+                "Run Backtest (current strategy)",
+                "Run Strategy Tuner",
+                "View Results",
+                "Apply Best Strategy",
+                "Back",
+            ],
+        ).ask()
+        if action is None or action == "Back":
+            return
+
+        if action == "Run Backtest (current strategy)":
+            _run_backtest_menu()
+        elif action == "Run Strategy Tuner":
+            _run_tuner_menu()
+        elif action == "View Results":
+            _view_results_menu()
+        elif action == "Apply Best Strategy":
+            _apply_best_strategy()
+
+
+def _run_backtest_menu() -> None:
+    """Run a backtest with the default strategy against historical data."""
+    seasons = questionary.checkbox(
+        "Select seasons to backtest:",
+        choices=["2024", "2025"],
+    ).ask()
+    if not seasons:
+        console.print("[yellow]No seasons selected.[/yellow]")
+        return
+
+    config = StrategyConfig()
+    all_season_results: list[SeasonBacktestResults] = []
+
+    for year_str in seasons:
+        year = int(year_str)
+        console.print(f"\n[dim]Scraping data for {year} season...[/dim]")
+
+        try:
+            actual_players = scrape_season(year)
+        except Exception as exc:
+            console.print(f"[red]Failed to scrape {year} season stats: {exc}[/red]")
+            continue
+
+        try:
+            scrape_preseason_adp(year)
+        except Exception as exc:
+            console.print(f"[yellow]Warning: Could not fetch ADP data for {year}: {exc}[/yellow]")
+
+        # Use current players.json as projection proxy
+        try:
+            projection_players = load_players()
+        except Exception as exc:
+            console.print(f"[red]Failed to load projection players: {exc}[/red]")
+            continue
+
+        console.print(f"[dim]Running 1000 backtest iterations for {year}...[/dim]")
+        try:
+            from rich.progress import Progress
+            with Progress(console=console) as progress:
+                task = progress.add_task(f"Backtesting {year}...", total=1)
+                result = run_backtest(
+                    projection_players=projection_players,
+                    actual_players=actual_players,
+                    config=config,
+                    iterations=1000,
+                    season=year,
+                )
+                progress.update(task, completed=1)
+            all_season_results.append(result)
+        except Exception as exc:
+            console.print(f"[red]Backtest failed for {year}: {exc}[/red]")
+            continue
+
+    if not all_season_results:
+        console.print("[red]No backtest results to display.[/red]")
+        return
+
+    print_full_report(all_season_results, console)
+
+    export = questionary.confirm("Export results to CSV?", default=False).ask()
+    if export:
+        BACKTEST_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        for result in all_season_results:
+            filepath = str(BACKTEST_RESULTS_DIR / f"{result.season}_results.csv")
+            export_results_csv(result, filepath)
+            console.print(f"[green]Exported to {filepath}[/green]")
+
+
+def _run_tuner_menu() -> None:
+    """Run the strategy tuner with random search."""
+    num_configs_str = questionary.text(
+        "Number of configs to test:", default="200",
+        validate=lambda v: v.isdigit() and int(v) > 0,
+    ).ask()
+    if num_configs_str is None:
+        return
+    num_configs = int(num_configs_str)
+
+    search_iters_str = questionary.text(
+        "Search iterations per config:", default="100",
+        validate=lambda v: v.isdigit() and int(v) > 0,
+    ).ask()
+    if search_iters_str is None:
+        return
+    search_iters = int(search_iters_str)
+
+    # Load data for available seasons
+    projection_players_by_season: dict[int, list[Player]] = {}
+    actual_players_by_season: dict[int, list[Player]] = {}
+
+    seasons = questionary.checkbox(
+        "Select seasons for tuning:",
+        choices=["2024", "2025"],
+    ).ask()
+    if not seasons:
+        console.print("[yellow]No seasons selected.[/yellow]")
+        return
+
+    for year_str in seasons:
+        year = int(year_str)
+        console.print(f"[dim]Loading data for {year}...[/dim]")
+        try:
+            actual_players = scrape_season(year)
+            actual_players_by_season[year] = actual_players
+        except Exception as exc:
+            console.print(f"[red]Failed to scrape {year} season stats: {exc}[/red]")
+            continue
+
+        try:
+            projection_players = load_players()
+            projection_players_by_season[year] = projection_players
+        except Exception as exc:
+            console.print(f"[red]Failed to load projections: {exc}[/red]")
+            continue
+
+    if not projection_players_by_season:
+        console.print("[red]No season data available for tuning.[/red]")
+        return
+
+    console.print(f"[dim]Running tuner with {num_configs} configs, {search_iters} iterations each...[/dim]")
+
+    try:
+        from rich.progress import Progress
+        with Progress(console=console) as progress:
+            search_task = progress.add_task("Search phase...", total=num_configs)
+            validate_task = progress.add_task("Validation phase...", total=5, visible=False)
+
+            def progress_callback(current: int, total: int, phase: str) -> None:
+                if phase == "search":
+                    progress.update(search_task, completed=current)
+                elif phase == "validate":
+                    progress.update(validate_task, visible=True, completed=current)
+
+            tuner_results = run_tuning(
+                projection_players_by_season=projection_players_by_season,
+                actual_players_by_season=actual_players_by_season,
+                num_configs=num_configs,
+                search_iterations=search_iters,
+                progress_callback=progress_callback,
+            )
+    except Exception as exc:
+        console.print(f"[red]Tuning failed: {exc}[/red]")
+        return
+
+    if not tuner_results:
+        console.print("[yellow]No tuning results produced.[/yellow]")
+        return
+
+    # Display top 5
+    top_5 = tuner_results[:5]
+    output = format_tuning_results(top_5)
+    console.print(output)
+
+    # Save tuning results to JSON
+    BACKTEST_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    import json
+    tuning_data = []
+    for tr in tuner_results:
+        tuning_data.append({
+            "config": tr.config.to_dict(),
+            "mean_points": tr.mean_points,
+            "iterations_run": tr.iterations_run,
+        })
+    tuning_path = BACKTEST_RESULTS_DIR / "tuning_results.json"
+    with open(tuning_path, "w") as f:
+        json.dump(tuning_data, f, indent=2)
+    console.print(f"[green]Tuning results saved to {tuning_path}[/green]")
+
+    export = questionary.confirm("Export tuning results to CSV?", default=False).ask()
+    if export:
+        csv_path = str(BACKTEST_RESULTS_DIR / "tuning_results.csv")
+        export_tuning_csv(tuner_results, csv_path)
+        console.print(f"[green]Exported to {csv_path}[/green]")
+
+
+def _view_results_menu() -> None:
+    """View existing backtest result files."""
+    if not BACKTEST_RESULTS_DIR.exists():
+        console.print("[yellow]No backtest results directory found.[/yellow]")
+        return
+
+    files = sorted(
+        [f.name for f in BACKTEST_RESULTS_DIR.iterdir()
+         if f.suffix in (".json", ".csv")],
+    )
+    if not files:
+        console.print("[yellow]No result files found.[/yellow]")
+        return
+
+    choice = questionary.select("Select a file to view:", choices=files + ["Back"]).ask()
+    if choice is None or choice == "Back":
+        return
+
+    filepath = BACKTEST_RESULTS_DIR / choice
+    try:
+        with open(filepath) as f:
+            content = f.read()
+        console.print(Panel(content[:5000], title=choice, style="dim"))
+        if len(content) > 5000:
+            console.print(f"[dim]... (truncated, {len(content)} total characters)[/dim]")
+    except Exception as exc:
+        console.print(f"[red]Failed to read file: {exc}[/red]")
+
+
+def _apply_best_strategy() -> None:
+    """Load tuning results and apply the best strategy config."""
+    import json
+
+    tuning_path = BACKTEST_RESULTS_DIR / "tuning_results.json"
+    if not tuning_path.exists():
+        console.print("[red]No tuning results found. Run the Strategy Tuner first.[/red]")
+        return
+
+    try:
+        with open(tuning_path) as f:
+            tuning_data = json.load(f)
+    except Exception as exc:
+        console.print(f"[red]Failed to load tuning results: {exc}[/red]")
+        return
+
+    if not tuning_data:
+        console.print("[red]Tuning results file is empty.[/red]")
+        return
+
+    best_entry = tuning_data[0]
+    best_config = StrategyConfig.from_dict(best_entry["config"])
+    best_pts = best_entry["mean_points"]
+
+    current_config = StrategyConfig()
+    # Use 0.0 as placeholder for current points since we don't have a backtest for it
+    current_pts = 0.0
+
+    output = format_before_after(current_config, best_config, current_pts, best_pts)
+    console.print(output)
+
+    confirm = questionary.confirm(
+        "Apply this configuration as your strategy?", default=False
+    ).ask()
+    if confirm:
+        BACKTEST_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        applied_path = BACKTEST_RESULTS_DIR / "applied_config.json"
+        with open(applied_path, "w") as f:
+            json.dump(best_config.to_dict(), f, indent=2)
+        console.print(f"[green]Best strategy saved to {applied_path}[/green]")
+    else:
+        console.print("[yellow]Strategy not applied.[/yellow]")
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  Main Menu
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -841,11 +1133,12 @@ def main_menu() -> None:
                     "4. Player Rankings",
                     "5. Update Player Data",
                     "6. Save/Load League",
-                    "7. Exit",
+                    "7. Backtest & Strategy Lab",
+                    "8. Exit",
                 ],
             ).ask()
 
-            if choice is None or "7. Exit" in choice:
+            if choice is None or "8. Exit" in choice:
                 console.print("[bold]Goodbye![/bold]")
                 break
             elif "1. Mock Draft" in choice:
@@ -860,6 +1153,8 @@ def main_menu() -> None:
                 update_player_data()
             elif "6. Save/Load" in choice:
                 save_load_league()
+            elif "7. Backtest" in choice:
+                _backtest_lab()
 
         except KeyboardInterrupt:
             console.print("\n[yellow]Returning to main menu... (Ctrl+C again to exit)[/yellow]")
