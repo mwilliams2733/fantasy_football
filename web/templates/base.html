@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Fantasy Football Draft Tool{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2>Fantasy Football</h2>
+        </div>
+        <ul class="nav-links">
+            <li><a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a></li>
+            <li><a href="/draft" class="{% if active_page == 'draft' %}active{% endif %}">Mock Draft</a></li>
+            <li><a href="/live-draft" class="{% if active_page == 'live-draft' %}active{% endif %}">Live Draft</a></li>
+            <li><a href="/rankings" class="{% if active_page == 'rankings' %}active{% endif %}">Player Rankings</a></li>
+            <li><a href="/team" class="{% if active_page == 'team' %}active{% endif %}">Team Manager</a></li>
+            <li><a href="/backtest" class="{% if active_page == 'backtest' %}active{% endif %}">Backtest Lab</a></li>
+            <li><a href="/players" class="{% if active_page == 'players' %}active{% endif %}">Player Data</a></li>
+        </ul>
+    </nav>
+
+    <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">&#9776;</button>
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

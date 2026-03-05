@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% set active_page = "dashboard" %}
+
+{% block title %}Dashboard - Fantasy Football Draft Tool{% endblock %}
+
+{% block content %}
+<h1>Fantasy Football Draft Tool</h1>
+
+<div class="card-grid">
+    <div class="card">
+        <h3>Players</h3>
+        <div class="big-number">{{ player_count }}</div>
+        <p>Players loaded and scored with VBD rankings.</p>
+        <a href="/rankings" class="btn-primary">View Rankings</a>
+    </div>
+
+    <div class="card">
+        <h3>Saved Leagues</h3>
+        <div class="big-number">{{ save_count }}</div>
+        <p>League configurations and draft results saved.</p>
+        <a href="/team" class="btn-primary">Manage Teams</a>
+    </div>
+
+    <div class="card">
+        <h3>Mock Draft</h3>
+        <p>Simulate a full snake draft against AI opponents. Test strategies and see projected outcomes.</p>
+        <a href="/draft" class="btn-primary">Start Draft</a>
+    </div>
+
+    <div class="card">
+        <h3>Backtest Lab</h3>
+        <p>Run strategy backtests to compare draft approaches and find optimal configurations.</p>
+        <a href="/backtest" class="btn-primary">Run Backtest</a>
+    </div>
+</div>
+{% endblock %}
