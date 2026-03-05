@@ -14,6 +14,8 @@ from src.data_scraper import (
     scrape_preseason_adp,
     parse_schedule,
     scrape_schedule,
+    _compute_defense_rankings,
+    scrape_defense_rankings,
     HISTORICAL_DIR,
 )
 from src.models import Position
@@ -351,4 +353,78 @@ def test_scrape_schedule_caches_locally(tmp_path):
             assert (tmp_path / "2024_schedule.json").exists()
             # Second call should use cache
             scrape_schedule(2024)
+            assert mock_fetch.call_count == 1
+
+
+def test_compute_defense_rankings_ranks_by_points_allowed():
+    """Teams should be ranked 1-N by points_allowed_per_game ascending."""
+    defense_stats = [
+        {"team": "BAL", "points_allowed_per_game": 17.6, "sacks": 48, "def_interceptions": 18},
+        {"team": "KC", "points_allowed_per_game": 19.2, "sacks": 40, "def_interceptions": 15},
+        {"team": "DAL", "points_allowed_per_game": 25.0, "sacks": 30, "def_interceptions": 10},
+    ]
+    rankings = _compute_defense_rankings(defense_stats)
+    assert rankings["BAL"]["vs_QB"] == 1
+    assert rankings["KC"]["vs_QB"] == 2
+    assert rankings["DAL"]["vs_QB"] == 3
+    # All position keys should be present
+    for team in ["BAL", "KC", "DAL"]:
+        assert set(rankings[team].keys()) == {"vs_QB", "vs_RB", "vs_WR", "vs_TE"}
+
+
+def test_compute_defense_rankings_empty_input():
+    """Empty input should return empty dict."""
+    assert _compute_defense_rankings([]) == {}
+
+
+def test_compute_defense_rankings_all_positions_same_base_rank():
+    """Each position key should have the same base rank for a team."""
+    defense_stats = [
+        {"team": "SF", "points_allowed_per_game": 15.0, "sacks": 50, "def_interceptions": 20},
+        {"team": "NYG", "points_allowed_per_game": 28.0, "sacks": 25, "def_interceptions": 8},
+    ]
+    rankings = _compute_defense_rankings(defense_stats)
+    # SF is rank 1 across all positions
+    assert rankings["SF"]["vs_QB"] == 1
+    assert rankings["SF"]["vs_RB"] == 1
+    assert rankings["SF"]["vs_WR"] == 1
+    assert rankings["SF"]["vs_TE"] == 1
+    # NYG is rank 2 across all positions
+    assert rankings["NYG"]["vs_QB"] == 2
+
+
+def test_scrape_defense_rankings_uses_cache(tmp_path):
+    """scrape_defense_rankings should return cached data without fetching."""
+    fake_rankings = {
+        "KC": {"vs_QB": 5, "vs_RB": 10, "vs_WR": 15, "vs_TE": 20},
+        "BAL": {"vs_QB": 1, "vs_RB": 2, "vs_WR": 3, "vs_TE": 4},
+    }
+    cache_file = tmp_path / "2024_defense_rankings.json"
+    with open(cache_file, "w") as f:
+        json.dump(fake_rankings, f)
+
+    with patch("src.data_scraper.HISTORICAL_DIR", tmp_path):
+        rankings = scrape_defense_rankings(2024)
+        assert "KC" in rankings
+        assert rankings["KC"]["vs_QB"] == 5
+        assert rankings["BAL"]["vs_RB"] == 2
+
+
+def test_scrape_defense_rankings_fetches_and_caches(tmp_path):
+    """When no cache exists, should fetch, parse, compute, and cache."""
+    with patch("src.data_scraper.HISTORICAL_DIR", tmp_path):
+        with patch("src.data_scraper._fetch_page") as mock_fetch:
+            mock_fetch.return_value = SAMPLE_DEFENSE_HTML
+            rankings = scrape_defense_rankings(2024)
+            assert (tmp_path / "2024_defense_rankings.json").exists()
+            # Should have at least one team
+            assert len(rankings) >= 1
+            # Verify structure
+            for team, pos_ranks in rankings.items():
+                assert "vs_QB" in pos_ranks
+                assert "vs_RB" in pos_ranks
+                assert "vs_WR" in pos_ranks
+                assert "vs_TE" in pos_ranks
+            # Second call should use cache
+            scrape_defense_rankings(2024)
             assert mock_fetch.call_count == 1
