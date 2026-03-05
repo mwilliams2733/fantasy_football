@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set active_page = "draft" %}
+
+{% block title %}Mock Draft - Fantasy Football Draft Tool{% endblock %}
+
+{% block content %}
+<h1>Mock Draft</h1>
+
+<div class="tab-group">
+    <button class="tab active" onclick="showTab('auto-sim')">Auto-Sim</button>
+    <button class="tab" onclick="showTab('interactive')">Interactive</button>
+</div>
+
+<div id="tab-auto-sim">
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 200px;">
+                <label for="team-name">Team Name</label>
+                <input type="text" id="team-name" value="My Team">
+            </div>
+            <div style="min-width: 150px;">
+                <label for="draft-position">Draft Position</label>
+                <select id="draft-position">
+                    {% for i in range(1, 13) %}
+                    <option value="{{ i }}">{{ i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <button class="btn-primary" id="run-draft-btn" onclick="runAutoSimDraft()">Run Draft</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="draft-results" class="hidden">
+        <div id="draft-board"></div>
+        <div id="team-results" style="margin-top: 2rem;"></div>
+    </div>
+</div>
+
+<div id="tab-interactive" class="hidden">
+    <div class="card">
+        <h2>Interactive Draft</h2>
+        <p>Coming soon — you will be able to make your own picks while AI drafts for the other teams.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/draft.js') }}"></script>
+<script>
+function showTab(tab) {
+    document.getElementById("tab-auto-sim").classList.toggle("hidden", tab !== "auto-sim");
+    document.getElementById("tab-interactive").classList.toggle("hidden", tab !== "interactive");
+    document.querySelectorAll(".tab-group .tab").forEach((el, i) => {
+        el.classList.toggle("active", (i === 0 && tab === "auto-sim") || (i === 1 && tab === "interactive"));
+    });
+}
+</script>
+{% endblock %}

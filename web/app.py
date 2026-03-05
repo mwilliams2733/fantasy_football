@@ -10,10 +10,11 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO
 
-from src.models import Position, StrategyConfig
+from src.models import Position, StrategyConfig, Team, League, TOTAL_ROUNDS
 from src.scoring import score_all_players
 from src.rankings import calculate_vbd, get_best_available_by_position
 from src.persistence import load_players, save_players, list_saves, load_league, save_league
+from src.draft import DraftEngine
 
 app = Flask(__name__)
 app.secret_key = "fantasy-football-local"
@@ -61,6 +62,63 @@ def rankings():
 @app.context_processor
 def inject_pos_colors():
     return {"pos_colors": POS_COLORS}
+
+
+@app.route("/draft")
+def draft():
+    return render_template("draft.html")
+
+
+@app.route("/api/draft/auto-sim", methods=["POST"])
+def api_draft_auto_sim():
+    data = request.get_json()
+    team_name = data.get("team_name", "My Team")
+    draft_position = int(data.get("draft_position", 1))
+
+    players = _load_and_prepare()
+
+    ai_names = ["Alpha", "Bravo", "Charlie", "Delta", "Echo",
+                "Foxtrot", "Golf", "Hotel", "India", "Juliet", "Kilo"]
+    teams = []
+    for i in range(1, 13):
+        if i == draft_position:
+            teams.append(Team(name=team_name, draft_position=i))
+        else:
+            name = ai_names.pop(0) if ai_names else f"Team {i}"
+            teams.append(Team(name=name, draft_position=i))
+
+    league = League(name="Mock Draft", teams=teams, available_players=players.copy())
+    engine = DraftEngine(league)
+
+    picks = []
+    while not engine.is_draft_complete:
+        team = engine.current_drafter()
+        pick = engine.ai_pick(team)
+        picks.append({
+            "round": pick.round_num,
+            "pick": pick.pick_num,
+            "team": pick.team.name,
+            "player": pick.player.name,
+            "position": pick.player.position.value,
+            "points": round(pick.player.fantasy_points, 1),
+            "vbd": round(pick.player.vbd_score, 1),
+        })
+
+    team_results = []
+    for t in teams:
+        total_pts = sum(e.player.fantasy_points for e in t.starters())
+        team_results.append({
+            "name": t.name,
+            "draft_position": t.draft_position,
+            "total_points": round(total_pts, 1),
+            "roster": [
+                {"player": e.player.name, "position": e.player.position.value,
+                 "slot": e.slot.value, "points": round(e.player.fantasy_points, 1)}
+                for e in t.roster
+            ],
+        })
+    team_results.sort(key=lambda t: t["total_points"], reverse=True)
+    return jsonify({"picks": picks, "teams": team_results})
 
 
 if __name__ == "__main__":

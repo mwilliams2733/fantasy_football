@@ -456,6 +456,45 @@ label {
     display: none !important;
 }
 
+/* --- Draft Board --- */
+.table-wrapper {
+    overflow-x: auto;
+    margin-top: 1rem;
+}
+
+.draft-board-table {
+    font-size: 0.8rem;
+}
+
+.draft-board-table th,
+.draft-board-table td {
+    padding: 0.35rem 0.5rem;
+    white-space: nowrap;
+}
+
+.draft-cell {
+    white-space: nowrap;
+}
+
+.data-table.compact th,
+.data-table.compact td {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+}
+
+.user-team {
+    border-color: var(--accent) !important;
+    border-width: 2px !important;
+}
+
+.team-card {
+    overflow: hidden;
+}
+
+.team-card .data-table {
+    margin-top: 0.75rem;
+}
+
 /* --- Responsive --- */
 @media (max-width: 768px) {
     .sidebar {
