@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% set active_page = "backtest" %}
+
+{% block title %}Backtest Lab - Fantasy Football{% endblock %}
+
+{% block head %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<h1>Backtest & Strategy Lab</h1>
+<p class="text-secondary">Run backtests, tune strategies, and analyze results with interactive charts.</p>
+
+<div class="tab-group" style="margin-top: 1.5rem;">
+    <button class="tab active" onclick="switchTab('backtest-tab')">Run Backtest</button>
+    <button class="tab" onclick="switchTab('tuner-tab')">Run Tuner</button>
+    <button class="tab" onclick="switchTab('results-tab')">Results</button>
+</div>
+
+<!-- Run Backtest Tab -->
+<div id="backtest-tab" class="tab-content">
+    <div class="card">
+        <h3>Backtest Configuration</h3>
+        <p>Simulate drafts against historical data to evaluate strategy performance.</p>
+
+        <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+            <div>
+                <label>Seasons</label>
+                <div style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="season-checkbox" value="2023"> 2023
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="season-checkbox" value="2024" checked> 2024
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="season-checkbox" value="2025"> 2025
+                    </label>
+                </div>
+            </div>
+            <div>
+                <label for="backtest-iterations">Iterations</label>
+                <input type="number" id="backtest-iterations" value="100" min="10" max="5000" style="width: 120px;">
+            </div>
+            <div style="align-self: flex-end;">
+                <button class="btn-primary" id="run-backtest-btn" onclick="runBacktest()">Run Backtest</button>
+            </div>
+        </div>
+
+        <div style="margin-top: 1rem;">
+            <div id="backtest-status" class="text-secondary" style="font-size: 0.9rem;"></div>
+            <div class="progress-bar" style="margin-top: 0.5rem;">
+                <div class="fill" id="backtest-progress-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="backtest-charts" style="margin-top: 1.5rem;">
+        <div class="card">
+            <div id="strategy-comparison-chart" style="width: 100%; height: 400px;"></div>
+        </div>
+        <div class="card" style="margin-top: 1rem;">
+            <div id="draft-position-chart" style="width: 100%; height: 350px;"></div>
+        </div>
+    </div>
+
+    <div id="backtest-summary" style="margin-top: 1rem;"></div>
+</div>
+
+<!-- Run Tuner Tab -->
+<div id="tuner-tab" class="tab-content hidden">
+    <div class="card">
+        <h3>Strategy Tuner</h3>
+        <p>Search for optimal strategy configurations using evolutionary optimization.</p>
+
+        <div style="display: flex; gap: 2rem; align-items: flex-start; flex-wrap: wrap;">
+            <div>
+                <label>Seasons</label>
+                <div style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="tuner-season-checkbox" value="2023"> 2023
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="tuner-season-checkbox" value="2024" checked> 2024
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer;">
+                        <input type="checkbox" class="tuner-season-checkbox" value="2025"> 2025
+                    </label>
+                </div>
+            </div>
+            <div>
+                <label for="tuner-configs">Config Count</label>
+                <input type="number" id="tuner-configs" value="50" min="10" max="500" style="width: 120px;">
+            </div>
+            <div>
+                <label for="tuner-iterations">Search Iterations</label>
+                <input type="number" id="tuner-iterations" value="50" min="10" max="500" style="width: 120px;">
+            </div>
+            <div style="align-self: flex-end;">
+                <button class="btn-primary" id="run-tuner-btn" onclick="runTuner()">Run Tuner</button>
+            </div>
+        </div>
+
+        <div style="margin-top: 1rem;">
+            <div id="tuner-status" class="text-secondary" style="font-size: 0.9rem;"></div>
+            <div class="progress-bar" style="margin-top: 0.5rem;">
+                <div class="fill" id="tuner-progress-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="tuner-results" style="margin-top: 1.5rem;"></div>
+</div>
+
+<!-- Results Tab -->
+<div id="results-tab" class="tab-content hidden">
+    <div class="card">
+        <h3>Saved Results</h3>
+        <p>Previously saved backtest and tuning results.</p>
+        <button class="btn-secondary" onclick="loadResultFiles()">Check for Existing Results</button>
+        <div id="results-file-list" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/backtest.js') }}"></script>
+{% endblock %}

@@ -18,6 +18,12 @@ from src.draft import DraftEngine
 from src.team_manager import optimize_lineup, evaluate_trade
 from src.waiver import get_waiver_recommendations
 from src.scoring import calculate_fantasy_points
+from src.backtest import run_backtest
+from src.strategy_tuner import run_tuning
+from src.backtest_report import export_results_csv, export_tuning_csv
+from src.data_scraper import scrape_season
+import copy
+import json as json_lib
 
 app = Flask(__name__)
 app.secret_key = "fantasy-football-local"
@@ -432,6 +438,118 @@ def api_team_waivers():
             for r in recs
         ]
     })
+
+
+# --- Backtest Lab ---
+
+@app.route("/backtest")
+def backtest():
+    """Backtest & Strategy Lab page."""
+    return render_template("backtest.html")
+
+
+@socketio.on("run_backtest")
+def handle_run_backtest(data):
+    """Run backtest with progress updates via WebSocket."""
+    seasons = data.get("seasons", [2024])
+    iterations = int(data.get("iterations", 100))
+
+    projection_players = _load_and_prepare()
+    results_list = []
+
+    for year in seasons:
+        emit("backtest_status", {"message": f"Scraping {year} data..."})
+        try:
+            actual_players = scrape_season(year)
+            score_all_players(actual_players)
+        except Exception as e:
+            emit("backtest_status", {"message": f"Error scraping {year}: {str(e)}. Using projections as actuals."})
+            actual_players = copy.deepcopy(projection_players)
+            score_all_players(actual_players)
+
+        emit("backtest_status", {"message": f"Running {iterations} drafts for {year}..."})
+        config = StrategyConfig()
+        result = run_backtest(projection_players, actual_players, config, iterations=iterations, season=year)
+        results_list.append(result)
+
+        # Save results
+        results_dir = PROJECT_ROOT / "data" / "backtest_results"
+        results_dir.mkdir(exist_ok=True)
+        export_results_csv(result, str(results_dir / f"{year}_results.csv"))
+
+    # Build chart data
+    chart_data = {"seasons": []}
+    for r in results_list:
+        chart_data["seasons"].append({
+            "year": r.season,
+            "vbd_mean": round(r.mean_vbd_points, 1),
+            "adp_mean": round(r.mean_adp_points, 1),
+            "random_mean": round(r.mean_random_points, 1),
+            "bust_rate": round(r.mean_bust_rate * 100, 1),
+            "hit_rate": round(r.mean_hit_rate * 100, 1),
+            "by_position": {str(k): round(v, 1) for k, v in r.points_by_position.items()},
+        })
+
+    emit("backtest_complete", chart_data)
+
+
+@socketio.on("run_tuner")
+def handle_run_tuner(data):
+    """Run strategy tuner with progress updates."""
+    num_configs = int(data.get("num_configs", 50))
+    search_iters = int(data.get("search_iterations", 50))
+    seasons = data.get("seasons", [2024])
+
+    projection_players = _load_and_prepare()
+    proj_by_season = {}
+    actual_by_season = {}
+
+    for year in seasons:
+        emit("tuner_status", {"message": f"Loading {year} data..."})
+        proj_by_season[year] = projection_players
+        try:
+            actual = scrape_season(year)
+            score_all_players(actual)
+            actual_by_season[year] = actual
+        except Exception:
+            actual_by_season[year] = copy.deepcopy(projection_players)
+            score_all_players(actual_by_season[year])
+
+    def progress_cb(current, total, phase):
+        emit("tuner_status", {"message": f"{phase.title()}: {current}/{total}", "progress": current / total})
+
+    emit("tuner_status", {"message": "Starting tuner..."})
+    results = run_tuning(
+        proj_by_season, actual_by_season,
+        num_configs=num_configs,
+        search_iterations=search_iters,
+        validation_iterations=search_iters * 2,
+        top_n=5,
+        progress_callback=progress_cb,
+    )
+
+    # Save results
+    results_dir = PROJECT_ROOT / "data" / "backtest_results"
+    results_dir.mkdir(exist_ok=True)
+    tuning_data = [{"config": r.config.to_dict(), "mean_points": r.mean_points, "iterations": r.iterations_run} for r in results]
+    with open(results_dir / "tuning_results.json", "w") as f:
+        json_lib.dump(tuning_data, f, indent=2)
+
+    emit("tuner_complete", {
+        "results": [
+            {"rank": i + 1, "mean_points": round(r.mean_points, 1), "config": r.config.to_dict()}
+            for i, r in enumerate(results)
+        ]
+    })
+
+
+@app.route("/api/backtest/results")
+def api_backtest_results():
+    results_dir = PROJECT_ROOT / "data" / "backtest_results"
+    if not results_dir.exists():
+        return jsonify({"files": []})
+    files = [f.name for f in results_dir.iterdir() if f.suffix in ('.csv', '.json')]
+    return jsonify({"files": sorted(files)})
 
 
 if __name__ == "__main__":
