@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% set active_page = "live-draft" %}
+
+{% block title %}Live Draft Assistant — Fantasy Football Draft Tool{% endblock %}
+
+{% block content %}
+<h1>Live Draft Assistant</h1>
+<p class="text-secondary">Record opponent picks as they happen and get real-time recommendations.</p>
+
+<div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0;">
+    <button class="btn-secondary" onclick="resetDraft()">Reset Draft</button>
+    <span id="available-count" class="text-secondary">{{ players|length }} players available</span>
+</div>
+
+<div class="int-draft-layout">
+    <!-- Left Column: Record Picks -->
+    <div class="int-draft-left">
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3>Record Pick</h3>
+            <input type="text" id="player-search" placeholder="Search players..." class="search-input"
+                   onkeyup="filterPlayers(this.value)">
+            <div style="max-height: 400px; overflow-y: auto; margin-top: 0.5rem;">
+                <table class="data-table compact" id="available-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Pos</th>
+                            <th>Pts</th>
+                            <th>VBD</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for player in players %}
+                        <tr data-player="{{ player.name }}">
+                            <td>{{ player.name }}</td>
+                            <td><span class="pos-badge pos-{{ player.position.value|lower }}">{{ player.position.value }}</span></td>
+                            <td>{{ "%.1f"|format(player.fantasy_points) }}</td>
+                            <td>{{ "%.1f"|format(player.vbd_score) }}</td>
+                            <td><button class="btn-primary btn-small" onclick="recordPick('{{ player.name|replace("'", "\\'") }}')">Pick</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Pick History</h3>
+            <div id="pick-log" class="draft-log-entries">
+                <p class="text-secondary" id="no-picks-msg">No picks recorded yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Column: Recommendations -->
+    <div class="int-draft-right">
+        <div class="card" style="margin-bottom: 1rem;">
+            <h3>Top 10 Recommendations</h3>
+            <div id="recommendations">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Best Available by Position</h3>
+            <div id="best-by-position">
+                <div class="loading-spinner"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let pickNumber = 0;
+
+    function filterPlayers(searchText) {
+        filterTable('available-table', searchText);
+    }
+
+    function recordPick(playerName) {
+        postJSON('/api/live-draft/pick', { player_name: playerName })
+            .then(data => {
+                // Update recommendations
+                renderRecommendations(data.recommendations);
+                renderBestByPosition(data.best_by_position);
+
+                // Update available count
+                document.getElementById('available-count').textContent =
+                    data.available_count + ' players available';
+
+                // Remove player row from table
+                const row = document.querySelector(`tr[data-player="${CSS.escape(playerName)}"]`);
+                if (row) row.remove();
+
+                // Add to pick log
+                addToPickLog(playerName);
+            });
+    }
+
+    function addToPickLog(playerName) {
+        pickNumber++;
+        const noMsg = document.getElementById('no-picks-msg');
+        if (noMsg) noMsg.remove();
+
+        const log = document.getElementById('pick-log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = `<span class="log-pick">#${pickNumber}</span><span>${playerName}</span>`;
+        log.prepend(entry);
+    }
+
+    function renderRecommendations(recs) {
+        const container = document.getElementById('recommendations');
+        if (!recs || recs.length === 0) {
+            container.innerHTML = '<p class="text-secondary">No recommendations available.</p>';
+            return;
+        }
+        let html = '';
+        recs.forEach((r, i) => {
+            html += `<div class="rec-item">
+                <span class="rec-rank">${i + 1}</span>
+                <span class="pos-badge pos-${r.position.toLowerCase()}">${r.position}</span>
+                <span class="rec-name">${r.name}</span>
+                <span class="rec-pts">${r.points} pts | VBD ${r.vbd}</span>
+            </div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    function renderBestByPosition(bestByPos) {
+        const container = document.getElementById('best-by-position');
+        if (!bestByPos) {
+            container.innerHTML = '<p class="text-secondary">No data available.</p>';
+            return;
+        }
+        let html = '';
+        const positions = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'];
+        positions.forEach(pos => {
+            const players = bestByPos[pos];
+            if (!players || players.length === 0) return;
+            html += `<div style="margin-bottom: 0.75rem;">
+                <span class="pos-badge pos-${pos.toLowerCase()}" style="margin-bottom: 0.25rem;">${pos}</span>
+                <table class="data-table compact" style="margin-top: 0.25rem;">
+                    <thead><tr><th>Name</th><th>Pts</th><th>VBD</th></tr></thead>
+                    <tbody>`;
+            players.forEach(p => {
+                html += `<tr><td>${p.name}</td><td>${p.points}</td><td>${p.vbd}</td></tr>`;
+            });
+            html += `</tbody></table></div>`;
+        });
+        container.innerHTML = html;
+    }
+
+    function resetDraft() {
+        if (!confirm('Reset the live draft? All recorded picks will be cleared.')) return;
+        postJSON('/api/live-draft/reset', {}).then(() => {
+            window.location.reload();
+        });
+    }
+
+    // Load initial recommendations on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        // Fire a dummy pick request with empty name to get initial recs
+        // Or we can just load fresh recs by posting with a non-existent player
+        postJSON('/api/live-draft/pick', { player_name: '__init__' })
+            .then(data => {
+                renderRecommendations(data.recommendations);
+                renderBestByPosition(data.best_by_position);
+                document.getElementById('available-count').textContent =
+                    data.available_count + ' players available';
+            });
+    });
+</script>
+{% endblock %}

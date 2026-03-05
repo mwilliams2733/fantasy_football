@@ -10,9 +10,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, emit
 
-from src.models import Position, StrategyConfig, Team, League, TOTAL_ROUNDS
+from src.models import Position, StrategyConfig, Team, League, TOTAL_ROUNDS, RosterSlot, FLEX_ELIGIBLE
 from src.scoring import score_all_players
-from src.rankings import calculate_vbd, get_best_available_by_position
+from src.rankings import calculate_vbd, get_best_available_by_position, get_draft_recommendations
 from src.persistence import load_players, save_players, list_saves, load_league, save_league
 from src.draft import DraftEngine
 
@@ -248,6 +248,58 @@ def _emit_draft_complete(sid):
 @socketio.on("disconnect")
 def handle_disconnect():
     _active_drafts.pop(request.sid, None)
+
+
+# --- Live Draft Assistant ---
+
+@app.route("/live-draft")
+def live_draft():
+    """Live draft assistant page."""
+    players = _load_and_prepare()
+    return render_template("live_draft.html", players=players)
+
+
+@app.route("/api/live-draft/pick", methods=["POST"])
+def api_live_draft_pick():
+    """Record an opponent's pick and return updated recommendations."""
+    data = request.get_json()
+    player_name = data.get("player_name")
+
+    session_players = app.config.get("_live_draft_players")
+    if session_players is None:
+        session_players = _load_and_prepare()
+        app.config["_live_draft_players"] = session_players
+
+    session_players = [p for p in session_players if p.name != player_name]
+    app.config["_live_draft_players"] = session_players
+
+    needs = [RosterSlot.QB, RosterSlot.RB, RosterSlot.WR, RosterSlot.TE,
+             RosterSlot.FLEX, RosterSlot.K, RosterSlot.DEF]
+    recs = get_draft_recommendations(session_players, needs, num_recommendations=10)
+    best_by_pos = {}
+    for pos in Position:
+        best = get_best_available_by_position(session_players, pos, count=3)
+        best_by_pos[pos.value] = [
+            {"name": p.name, "points": round(p.fantasy_points, 1), "vbd": round(p.vbd_score, 1)}
+            for p in best
+        ]
+
+    return jsonify({
+        "recommendations": [
+            {"name": p.name, "position": p.position.value,
+             "points": round(p.fantasy_points, 1), "vbd": round(p.vbd_score, 1)}
+            for p in recs
+        ],
+        "best_by_position": best_by_pos,
+        "available_count": len(session_players),
+    })
+
+
+@app.route("/api/live-draft/reset", methods=["POST"])
+def api_live_draft_reset():
+    """Reset the live draft player pool."""
+    app.config.pop("_live_draft_players", None)
+    return jsonify({"status": "reset"})
 
 
 if __name__ == "__main__":
