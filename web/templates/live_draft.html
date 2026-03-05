@@ -7,9 +7,27 @@
 <h1>Live Draft Assistant</h1>
 <p class="text-secondary">Record opponent picks as they happen and get real-time recommendations.</p>
 
-<div style="display: flex; align-items: center; gap: 1rem; margin: 1rem 0;">
-    <button class="btn-secondary" onclick="resetDraft()">Reset Draft</button>
-    <span id="available-count" class="text-secondary">{{ players|length }} players available</span>
+<div class="card" style="margin-bottom: 1rem;">
+    <h3>Configuration</h3>
+    <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+        <label>League Size:
+            <select id="league-size" class="search-input" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+                <option value="8">8 teams</option>
+                <option value="10">10 teams</option>
+                <option value="12" selected>12 teams</option>
+                <option value="14">14 teams</option>
+            </select>
+        </label>
+        <label>Your Draft Position:
+            <select id="draft-position" class="search-input" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+                {% for i in range(1, 13) %}
+                <option value="{{ i }}">{{ i }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button class="btn-secondary" onclick="resetDraft()">Reset Draft</button>
+        <span id="available-count" class="text-secondary">{{ players|length }} players available</span>
+    </div>
 </div>
 
 <div class="int-draft-layout">
@@ -163,15 +181,15 @@
 
     // Load initial recommendations on page load
     document.addEventListener('DOMContentLoaded', () => {
-        // Fire a dummy pick request with empty name to get initial recs
-        // Or we can just load fresh recs by posting with a non-existent player
-        postJSON('/api/live-draft/pick', { player_name: '__init__' })
+        fetch('/api/live-draft/recommendations')
+            .then(res => res.json())
             .then(data => {
                 renderRecommendations(data.recommendations);
                 renderBestByPosition(data.best_by_position);
                 document.getElementById('available-count').textContent =
                     data.available_count + ' players available';
-            });
+            })
+            .catch(err => console.error('Failed to load recommendations:', err));
     });
 </script>
 {% endblock %}

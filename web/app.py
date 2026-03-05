@@ -295,6 +295,36 @@ def api_live_draft_pick():
     })
 
 
+@app.route("/api/live-draft/recommendations", methods=["GET"])
+def api_live_draft_recommendations():
+    """Get current recommendations without modifying player pool."""
+    session_players = app.config.get("_live_draft_players")
+    if session_players is None:
+        session_players = _load_and_prepare()
+        app.config["_live_draft_players"] = session_players
+
+    needs = [RosterSlot.QB, RosterSlot.RB, RosterSlot.WR, RosterSlot.TE,
+             RosterSlot.FLEX, RosterSlot.K, RosterSlot.DEF]
+    recs = get_draft_recommendations(session_players, needs, num_recommendations=10)
+    best_by_pos = {}
+    for pos in Position:
+        best = get_best_available_by_position(session_players, pos, count=3)
+        best_by_pos[pos.value] = [
+            {"name": p.name, "points": round(p.fantasy_points, 1), "vbd": round(p.vbd_score, 1)}
+            for p in best
+        ]
+
+    return jsonify({
+        "recommendations": [
+            {"name": p.name, "position": p.position.value,
+             "points": round(p.fantasy_points, 1), "vbd": round(p.vbd_score, 1)}
+            for p in recs
+        ],
+        "best_by_position": best_by_pos,
+        "available_count": len(session_players),
+    })
+
+
 @app.route("/api/live-draft/reset", methods=["POST"])
 def api_live_draft_reset():
     """Reset the live draft player pool."""
