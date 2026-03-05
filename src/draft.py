@@ -11,6 +11,7 @@ from src.rankings import (
     calculate_vbd, get_draft_recommendations,
     get_best_available_by_position, get_value_picks,
 )
+from src.matchup_optimizer import MAX_ROSTER
 
 
 def generate_snake_order(num_teams: int, num_rounds: int) -> list[list[int]]:
@@ -119,6 +120,16 @@ class DraftEngine:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [p for _, p in scored]
 
+    def _filter_roster_limits(self, players: list[Player], team: Team) -> list[Player]:
+        """Filter out players that would exceed roster composition limits."""
+        filtered = []
+        for p in players:
+            max_allowed = MAX_ROSTER.get(p.position)
+            if max_allowed is not None and team.position_count(p.position) >= max_allowed:
+                continue
+            filtered.append(p)
+        return filtered
+
     def ai_pick(self, team: Team) -> DraftPick:
         needs = team.needs()
         recommendations = get_draft_recommendations(
@@ -131,15 +142,37 @@ class DraftEngine:
                 key=lambda p: p.vbd_score,
                 reverse=True,
             )
-            pick_player = available_sorted[0] if available_sorted else None
+            recommendations = available_sorted[:10] if available_sorted else []
         else:
             recommendations = self._apply_round_bias(recommendations, team)
-            top = recommendations[:3]
-            weights = [3, 2, 1][:len(top)]
-            pick_player = random.choices(top, weights=weights, k=1)[0]
-        if pick_player:
-            return self.make_pick(team, pick_player)
-        raise ValueError("No players available to draft")
+
+        # Filter out players that would violate roster limits
+        filtered = self._filter_roster_limits(recommendations, team)
+
+        if not filtered:
+            # Fallback: pick any available player not violating limits
+            fallback = self._filter_roster_limits(
+                sorted(self.league.available_players, key=lambda p: p.vbd_score, reverse=True),
+                team,
+            )
+            if fallback:
+                filtered = fallback[:1]
+
+        if not filtered:
+            # Last resort: pick best available ignoring roster limits
+            any_available = sorted(
+                self.league.available_players,
+                key=lambda p: p.vbd_score,
+                reverse=True,
+            )
+            if not any_available:
+                raise ValueError("No players available to draft")
+            filtered = any_available[:1]
+
+        top = filtered[:3]
+        weights = [3, 2, 1][:len(top)]
+        pick_player = random.choices(top, weights=weights, k=1)[0]
+        return self.make_pick(team, pick_player)
 
     def get_recommendations(self, team: Team, count: int = 5) -> list[Player]:
         needs = team.needs()
