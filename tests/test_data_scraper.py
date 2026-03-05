@@ -12,6 +12,8 @@ from src.data_scraper import (
     build_player_dataset,
     scrape_season,
     scrape_preseason_adp,
+    parse_schedule,
+    scrape_schedule,
     HISTORICAL_DIR,
 )
 from src.models import Position
@@ -256,3 +258,97 @@ def test_scrape_preseason_adp_caches_locally(tmp_path):
         # Check cache file exists
         cache_file = tmp_path / "2024_preseason_adp.json"
         assert cache_file.exists()
+
+
+def test_parse_schedule():
+    html = """
+    <table id="games">
+    <thead><tr><th>Week</th><th>Winner/tie</th><th></th><th>Loser/tie</th></tr></thead>
+    <tbody>
+    <tr><td data-stat="week_num">1</td>
+        <td data-stat="winner"><a href="/teams/kan/2024.htm">Kansas City Chiefs</a></td>
+        <td data-stat="game_location"></td>
+        <td data-stat="loser"><a href="/teams/rav/2024.htm">Baltimore Ravens</a></td></tr>
+    <tr><td data-stat="week_num">1</td>
+        <td data-stat="winner"><a href="/teams/phi/2024.htm">Philadelphia Eagles</a></td>
+        <td data-stat="game_location">@</td>
+        <td data-stat="loser"><a href="/teams/gnb/2024.htm">Green Bay Packers</a></td></tr>
+    </tbody>
+    </table>
+    """
+    schedule = parse_schedule(html)
+    # KC played at home vs BAL
+    assert "KC" in schedule
+    assert schedule["KC"][0] == "BAL"
+    # BAL played at KC
+    assert "BAL" in schedule
+    assert schedule["BAL"][0] == "KC"
+    # PHI played @ GB (winner was away)
+    assert "PHI" in schedule
+    assert schedule["PHI"][0] == "GB"
+    assert "GB" in schedule
+    assert schedule["GB"][0] == "PHI"
+
+
+def test_parse_schedule_handles_bye_weeks():
+    """Teams with no game in a week should have None for that week."""
+    html = """
+    <table id="games">
+    <thead><tr><th>Week</th><th>Winner/tie</th><th></th><th>Loser/tie</th></tr></thead>
+    <tbody>
+    <tr><td data-stat="week_num">1</td>
+        <td data-stat="winner"><a href="/teams/kan/2024.htm">Kansas City Chiefs</a></td>
+        <td data-stat="game_location"></td>
+        <td data-stat="loser"><a href="/teams/rav/2024.htm">Baltimore Ravens</a></td></tr>
+    <tr><td data-stat="week_num">3</td>
+        <td data-stat="winner"><a href="/teams/kan/2024.htm">Kansas City Chiefs</a></td>
+        <td data-stat="game_location"></td>
+        <td data-stat="loser"><a href="/teams/phi/2024.htm">Philadelphia Eagles</a></td></tr>
+    </tbody>
+    </table>
+    """
+    schedule = parse_schedule(html)
+    # KC has a bye in week 2 (index 1)
+    assert schedule["KC"][0] == "BAL"
+    assert schedule["KC"][1] is None
+    assert schedule["KC"][2] == "PHI"
+
+
+def test_parse_schedule_skips_non_numeric_weeks():
+    """Playoff week labels like 'WildCard' should be skipped."""
+    html = """
+    <table id="games">
+    <thead><tr><th>Week</th><th>Winner/tie</th><th></th><th>Loser/tie</th></tr></thead>
+    <tbody>
+    <tr><td data-stat="week_num">1</td>
+        <td data-stat="winner"><a href="/teams/kan/2024.htm">Kansas City Chiefs</a></td>
+        <td data-stat="game_location"></td>
+        <td data-stat="loser"><a href="/teams/rav/2024.htm">Baltimore Ravens</a></td></tr>
+    <tr><td data-stat="week_num">WildCard</td>
+        <td data-stat="winner"><a href="/teams/kan/2024.htm">Kansas City Chiefs</a></td>
+        <td data-stat="game_location"></td>
+        <td data-stat="loser"><a href="/teams/phi/2024.htm">Philadelphia Eagles</a></td></tr>
+    </tbody>
+    </table>
+    """
+    schedule = parse_schedule(html)
+    # Only week 1 game should be in schedule
+    assert len(schedule["KC"]) == 1
+    assert schedule["KC"][0] == "BAL"
+
+
+def test_parse_schedule_empty_table():
+    html = """<table id="games"><tbody></tbody></table>"""
+    schedule = parse_schedule(html)
+    assert schedule == {}
+
+
+def test_scrape_schedule_caches_locally(tmp_path):
+    with patch("src.data_scraper.HISTORICAL_DIR", tmp_path):
+        with patch("src.data_scraper._fetch_page") as mock_fetch:
+            mock_fetch.return_value = "<html><body><table id='games'><tbody></tbody></table></body></html>"
+            scrape_schedule(2024)
+            assert (tmp_path / "2024_schedule.json").exists()
+            # Second call should use cache
+            scrape_schedule(2024)
+            assert mock_fetch.call_count == 1

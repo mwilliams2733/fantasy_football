@@ -430,6 +430,93 @@ def scrape_season(year: int) -> list[Player]:
     return players
 
 
+# PFR URL path codes to standard team abbreviations (matching players.json)
+_PFR_TEAM_ABBREVS = {
+    "crd": "ARI", "atl": "ATL", "rav": "BAL", "buf": "BUF",
+    "car": "CAR", "chi": "CHI", "cin": "CIN", "cle": "CLE",
+    "dal": "DAL", "den": "DEN", "det": "DET", "gnb": "GB",
+    "htx": "HOU", "clt": "IND", "jax": "JAX", "kan": "KC",
+    "rai": "LV", "sdg": "LAC", "ram": "LAR", "mia": "MIA",
+    "min": "MIN", "nwe": "NE", "nor": "NO", "nyg": "NYG",
+    "nyj": "NYJ", "phi": "PHI", "pit": "PIT", "sfo": "SF",
+    "sea": "SEA", "tam": "TB", "oti": "TEN", "was": "WAS",
+}
+
+
+def _extract_team_abbrev(cell) -> str:
+    """Extract team abbreviation from a PFR game cell."""
+    link = cell.find("a")
+    if link and link.get("href"):
+        # href like "/teams/kan/2024.htm"
+        parts = link["href"].strip("/").split("/")
+        if len(parts) >= 2:
+            pfr_code = parts[1].lower()
+            return _PFR_TEAM_ABBREVS.get(pfr_code, pfr_code.upper())
+    return cell.get_text(strip=True)
+
+
+def parse_schedule(html: str) -> dict[str, list[str | None]]:
+    """Parse PFR games page into a schedule.
+
+    Returns dict mapping team abbreviation to list of opponents by week index.
+    Week index 0 = Week 1, etc. None for bye weeks.
+    """
+    table = _find_table(html, "games")
+    if table is None:
+        return {}
+
+    # Collect all games by week
+    games: list[tuple[int, str, str]] = []  # (week, team1, team2)
+    rows = table.find("tbody").find_all("tr") if table.find("tbody") else []
+    for row in rows:
+        if _is_header_row(row):
+            continue
+        week_cell = row.find("td", {"data-stat": "week_num"})
+        winner_cell = row.find("td", {"data-stat": "winner"})
+        loser_cell = row.find("td", {"data-stat": "loser"})
+        if not week_cell or not winner_cell or not loser_cell:
+            continue
+        week_text = week_cell.get_text(strip=True)
+        if not week_text.isdigit():
+            continue
+        week = int(week_text)
+        winner = _extract_team_abbrev(winner_cell)
+        loser = _extract_team_abbrev(loser_cell)
+        if winner and loser:
+            games.append((week, winner, loser))
+
+    # Build schedule: {team: [opponent_week1, opponent_week2, ...]}
+    max_week = max((g[0] for g in games), default=0)
+    schedule: dict[str, list[str | None]] = {}
+    for week, team1, team2 in games:
+        for t, opp in [(team1, team2), (team2, team1)]:
+            if t not in schedule:
+                schedule[t] = [None] * max_week
+            idx = week - 1
+            if idx < len(schedule[t]):
+                schedule[t][idx] = opp
+
+    return schedule
+
+
+def scrape_schedule(year: int) -> dict[str, list[str | None]]:
+    """Scrape NFL schedule for a given year. Cached to disk."""
+    cache_file = HISTORICAL_DIR / f"{year}_schedule.json"
+    if cache_file.exists():
+        with open(cache_file) as f:
+            return json.load(f)
+
+    HISTORICAL_DIR.mkdir(parents=True, exist_ok=True)
+    url = f"https://www.pro-football-reference.com/years/{year}/games.htm"
+    html = _fetch_page(url)
+    schedule = parse_schedule(html)
+
+    with open(cache_file, "w") as f:
+        json.dump(schedule, f, indent=2)
+
+    return schedule
+
+
 def scrape_preseason_adp(year: int) -> dict[str, float]:
     """Get preseason ADP data. Uses fallback generation if scraping is unreliable.
 
