@@ -79,3 +79,59 @@ def test_validate_roster_rules():
     violations = validate_roster_rules(team2)
     assert len(violations) == 1
     assert "QB" in violations[0]
+
+
+def test_monte_carlo_returns_valid_stats():
+    from src.matchup_optimizer import monte_carlo_lineup
+    roster = [
+        RosterEntry(player=_make_player("QB1", "QB", 20.0, "KCC"), slot=RosterSlot.QB),
+        RosterEntry(player=_make_player("RB1", "RB", 15.0, "KCC"), slot=RosterSlot.RB),
+        RosterEntry(player=_make_player("RB2", "RB", 12.0, "BAL"), slot=RosterSlot.RB),
+        RosterEntry(player=_make_player("WR1", "WR", 18.0, "BAL"), slot=RosterSlot.WR),
+        RosterEntry(player=_make_player("WR2", "WR", 14.0, "PHI"), slot=RosterSlot.WR),
+        RosterEntry(player=_make_player("TE1", "TE", 10.0, "PHI"), slot=RosterSlot.TE),
+        RosterEntry(player=_make_player("FLEX1", "RB", 8.0, "KCC"), slot=RosterSlot.FLEX),
+        RosterEntry(player=_make_player("K1", "K", 7.0, "DAL"), slot=RosterSlot.K),
+        RosterEntry(player=_make_player("DEF1", "DEF", 6.0, "DAL"), slot=RosterSlot.DEF),
+    ]
+    opponent_map = {"KCC": "BAL", "BAL": "KCC", "PHI": "DAL", "DAL": "PHI"}
+    defense_rankings = {
+        "BAL": {"vs_QB": 3, "vs_RB": 5, "vs_WR": 10, "vs_TE": 15},
+        "KCC": {"vs_QB": 20, "vs_RB": 18, "vs_WR": 22, "vs_TE": 25},
+        "DAL": {"vs_QB": 16, "vs_RB": 16, "vs_WR": 16, "vs_TE": 16},
+        "PHI": {"vs_QB": 10, "vs_RB": 8, "vs_WR": 12, "vs_TE": 14},
+    }
+    mc = monte_carlo_lineup(roster, opponent_map, defense_rankings, simulations=200)
+    assert mc.floor <= mc.mean <= mc.ceiling
+    assert 0.0 <= mc.consistency <= 100.0
+
+
+def test_optimize_with_matchups_returns_recommendation():
+    from src.matchup_optimizer import optimize_with_matchups
+    roster = [
+        RosterEntry(player=_make_player("QB1", "QB", 20.0, "KCC"), slot=RosterSlot.QB),
+        RosterEntry(player=_make_player("RB1", "RB", 15.0, "KCC"), slot=RosterSlot.RB),
+        RosterEntry(player=_make_player("RB2", "RB", 12.0, "BAL"), slot=RosterSlot.RB),
+        RosterEntry(player=_make_player("RB3", "RB", 8.0, "BAL"), slot=RosterSlot.BENCH),
+        RosterEntry(player=_make_player("WR1", "WR", 18.0, "PHI"), slot=RosterSlot.WR),
+        RosterEntry(player=_make_player("WR2", "WR", 14.0, "PHI"), slot=RosterSlot.WR),
+        RosterEntry(player=_make_player("TE1", "TE", 10.0, "DAL"), slot=RosterSlot.TE),
+        RosterEntry(player=_make_player("K1", "K", 7.0, "DAL"), slot=RosterSlot.K),
+        RosterEntry(player=_make_player("DEF1", "DEF", 6.0, "DAL"), slot=RosterSlot.DEF),
+    ]
+    team = Team(name="Test", draft_position=1, roster=roster)
+    schedule = {
+        "KCC": ["BAL", "DEN"], "BAL": ["KCC", "CIN"],
+        "PHI": ["DAL", "NYG"], "DAL": ["PHI", "WAS"],
+    }
+    defense_rankings = {
+        "BAL": {"vs_QB": 3, "vs_RB": 5, "vs_WR": 10, "vs_TE": 15},
+        "KCC": {"vs_QB": 20, "vs_RB": 18, "vs_WR": 22, "vs_TE": 25},
+        "DAL": {"vs_QB": 16, "vs_RB": 16, "vs_WR": 16, "vs_TE": 16},
+        "PHI": {"vs_QB": 10, "vs_RB": 8, "vs_WR": 12, "vs_TE": 14},
+    }
+    result = optimize_with_matchups(team, week=1, schedule=schedule, defense_rankings=defense_rankings)
+    assert result["recommended"] is not None
+    assert result["week"] == 1
+    assert "monte_carlo" in result["recommended"]
+    assert result["recommended"]["monte_carlo"]["floor"] <= result["recommended"]["monte_carlo"]["ceiling"]
