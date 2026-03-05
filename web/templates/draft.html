@@ -39,14 +39,72 @@
 </div>
 
 <div id="tab-interactive" class="hidden">
-    <div class="card">
+    <!-- Setup Form -->
+    <div id="int-setup" class="card" style="margin-bottom: 1.5rem;">
         <h2>Interactive Draft</h2>
-        <p>Coming soon — you will be able to make your own picks while AI drafts for the other teams.</p>
+        <p>Make your own picks while AI drafts for the other teams in real time.</p>
+        <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1rem;">
+            <div style="flex: 1; min-width: 200px;">
+                <label for="int-team-name">Team Name</label>
+                <input type="text" id="int-team-name" value="My Team">
+            </div>
+            <div style="min-width: 150px;">
+                <label for="int-draft-position">Draft Position</label>
+                <select id="int-draft-position">
+                    {% for i in range(1, 13) %}
+                    <option value="{{ i }}">{{ i }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <button class="btn-primary" onclick="startInteractiveDraft()">Start Interactive Draft</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Draft UI (hidden until started) -->
+    <div id="int-draft-ui" class="hidden">
+        <div class="draft-status" id="draft-status">Connecting...</div>
+
+        <div id="pick-controls" class="hidden">
+            <div class="int-draft-layout">
+                <!-- Left: Available Players -->
+                <div class="int-draft-left">
+                    <div class="card" style="padding: 1rem;">
+                        <h3>Available Players</h3>
+                        <div id="available-players"></div>
+                    </div>
+                </div>
+                <!-- Right: Roster + Recommendations -->
+                <div class="int-draft-right">
+                    <div class="card" style="padding: 1rem; margin-bottom: 1rem;">
+                        <div id="recommendations"></div>
+                    </div>
+                    <div class="card" style="padding: 1rem;">
+                        <div id="my-roster"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Draft Log -->
+        <div class="card" style="margin-top: 1rem; padding: 1rem;">
+            <div id="draft-log">
+                <h3>Draft Log</h3>
+                <p class="text-secondary">Waiting for picks...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Results (shown after draft completes) -->
+    <div id="interactive-results" class="hidden">
+        <div id="int-team-results" style="margin-top: 2rem;"></div>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="{{ url_for('static', filename='js/draft.js') }}"></script>
 <script>
 function showTab(tab) {
