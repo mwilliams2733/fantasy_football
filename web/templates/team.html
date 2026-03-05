@@ -72,6 +72,30 @@
         </div>
     </div>
 </div>
+
+<!-- Matchup Optimizer -->
+<div id="matchup-section" class="card hidden" style="margin-top: 1rem;">
+    <h3>Matchup Lineup Optimizer</h3>
+    <p class="text-secondary">Optimize your starting lineup based on weekly matchups.</p>
+    <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
+        <label>Week:
+            <select id="matchup-week" class="search-input" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+                {% for w in range(1, 19) %}
+                <option value="{{ w }}">Week {{ w }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>Year:
+            <input type="number" id="matchup-year" class="search-input" value="2024"
+                   style="width: 80px; display: inline-block; margin-left: 0.5rem;">
+        </label>
+        <button class="btn-primary" onclick="runMatchupOptimizer()">Optimize for Matchups</button>
+    </div>
+    <div id="matchup-status" class="text-secondary"></div>
+    <div id="roster-violations"></div>
+    <div id="matchup-results"></div>
+    <div id="matchup-alternatives" style="margin-top: 1rem;"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -128,6 +152,7 @@
                 }
                 renderRoster(data.roster, data.starter_points, data.team_name);
                 document.getElementById('roster-section').classList.remove('hidden');
+                document.getElementById('matchup-section').classList.remove('hidden');
                 // Reset waiver results
                 document.getElementById('waiver-results').innerHTML =
                     '<p class="text-secondary">Click "Get Recommendations" to find waiver wire upgrades.</p>';
@@ -206,6 +231,113 @@
             </div>`;
         });
         container.innerHTML = html;
+    }
+
+    function runMatchupOptimizer() {
+        const leagueFile = document.getElementById('league-select').value;
+        const teamName = document.getElementById('team-select').value;
+        const week = document.getElementById('matchup-week').value;
+        const year = document.getElementById('matchup-year').value;
+
+        document.getElementById('matchup-status').textContent = 'Analyzing matchups...';
+        document.getElementById('matchup-results').innerHTML = '<div class="loading-spinner"></div>';
+
+        postJSON('/api/team/matchup-optimize', {
+            league_file: leagueFile, team_name: teamName,
+            week: parseInt(week), year: parseInt(year),
+        }).then(data => {
+            document.getElementById('matchup-status').textContent = '';
+            if (data.error) {
+                document.getElementById('matchup-results').innerHTML =
+                    `<p style="color: #e74c3c;">${data.error}</p>`;
+                return;
+            }
+            renderMatchupResults(data);
+        }).catch(err => {
+            document.getElementById('matchup-status').textContent = '';
+            document.getElementById('matchup-results').innerHTML =
+                '<p style="color: #e74c3c;">Failed to run optimizer. Check console.</p>';
+            console.error(err);
+        });
+    }
+
+    function renderMatchupResults(data) {
+        // Roster violations
+        const violDiv = document.getElementById('roster-violations');
+        if (data.roster_violations && data.roster_violations.length > 0) {
+            violDiv.innerHTML = data.roster_violations.map(v =>
+                `<p style="color: #e74c3c; font-weight: bold;">Warning: ${v}</p>`
+            ).join('');
+        } else {
+            violDiv.innerHTML = '';
+        }
+
+        // Recommended lineup
+        const rec = data.recommended;
+        if (!rec) {
+            document.getElementById('matchup-results').innerHTML =
+                '<p class="text-secondary">No lineup recommendations available.</p>';
+            return;
+        }
+
+        let html = `<h4>Recommended Lineup -- Week ${data.week}</h4>`;
+        html += `<div style="display: flex; gap: 2rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <div class="card" style="padding: 0.75rem;">
+                <strong>Expected:</strong> ${rec.monte_carlo.mean} pts
+            </div>
+            <div class="card" style="padding: 0.75rem;">
+                <strong>Floor:</strong> ${rec.monte_carlo.floor} pts
+            </div>
+            <div class="card" style="padding: 0.75rem;">
+                <strong>Ceiling:</strong> ${rec.monte_carlo.ceiling} pts
+            </div>
+            <div class="card" style="padding: 0.75rem;">
+                <strong>Consistency:</strong> ${rec.monte_carlo.consistency}%
+            </div>
+        </div>`;
+
+        html += renderMatchupTable(rec.players);
+        document.getElementById('matchup-results').innerHTML = html;
+
+        // Alternatives
+        const altDiv = document.getElementById('matchup-alternatives');
+        if (data.alternatives && data.alternatives.length > 0) {
+            let altHtml = '<h4>Alternative Lineups</h4>';
+            data.alternatives.forEach((alt, i) => {
+                altHtml += `<details style="margin-bottom: 0.5rem;">
+                    <summary style="cursor: pointer; color: var(--text-primary);">
+                        Option ${i + 2}: ${alt.total_points} adj pts |
+                        Expected ${alt.monte_carlo.mean} | Floor ${alt.monte_carlo.floor} | Ceiling ${alt.monte_carlo.ceiling}
+                    </summary>
+                    <div style="margin-top: 0.5rem;">${renderMatchupTable(alt.players)}</div>
+                </details>`;
+            });
+            altDiv.innerHTML = altHtml;
+        } else {
+            altDiv.innerHTML = '';
+        }
+    }
+
+    function renderMatchupTable(players) {
+        let html = '<table class="data-table"><thead><tr>';
+        html += '<th>Slot</th><th>Pos</th><th>Player</th><th>Opponent</th>';
+        html += '<th>Base Pts</th><th>Adj Pts</th><th>Matchup</th>';
+        html += '</tr></thead><tbody>';
+        players.forEach(p => {
+            const gradeColor = p.matchup_grade === 'favorable' ? '#2ecc71' :
+                              p.matchup_grade === 'tough' ? '#e74c3c' : '#f1c40f';
+            html += `<tr>
+                <td>${p.slot}</td>
+                <td><span class="pos-badge pos-${p.position.toLowerCase()}">${p.position}</span></td>
+                <td>${p.name}</td>
+                <td>${p.opponent}</td>
+                <td>${p.base_pts}</td>
+                <td><strong>${p.adjusted_pts}</strong></td>
+                <td style="color: ${gradeColor}; font-weight: bold;">${p.matchup_grade.toUpperCase()}</td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        return html;
     }
 </script>
 {% endblock %}
