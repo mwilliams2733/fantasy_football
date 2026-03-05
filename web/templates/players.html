@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% set active_page = "players" %}
+
+{% block title %}Player Data — Fantasy Football Draft Tool{% endblock %}
+
+{% block head %}
+<style>
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+    }
+    .modal-overlay.active {
+        display: flex;
+    }
+    .modal-content {
+        background: var(--card-bg, #1e1e2e);
+        border: 1px solid var(--border-color, #333);
+        border-radius: 12px;
+        padding: 2rem;
+        max-width: 600px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    .modal-content h2 {
+        margin-top: 0;
+        margin-bottom: 1rem;
+    }
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+    }
+    .form-grid .full-width {
+        grid-column: 1 / -1;
+    }
+    .form-grid label {
+        display: block;
+        font-size: 0.85rem;
+        color: var(--text-muted, #999);
+        margin-bottom: 0.25rem;
+    }
+    .form-grid input, .form-grid select {
+        width: 100%;
+        padding: 0.5rem;
+        border-radius: 6px;
+        border: 1px solid var(--border-color, #333);
+        background: var(--bg-color, #12121a);
+        color: var(--text-color, #eee);
+        box-sizing: border-box;
+    }
+    .stat-fields {
+        display: none;
+    }
+    .stat-fields.active {
+        display: block;
+    }
+    .modal-actions {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: flex-end;
+        margin-top: 1.25rem;
+    }
+    .top-bar {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    .top-bar .search-input {
+        flex: 1;
+        min-width: 200px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Player Data</h1>
+
+<div class="top-bar">
+    <input type="text" placeholder="Search players..." class="search-input" onkeyup="filterPlayers(this.value)">
+    <button class="btn-primary" onclick="showAddModal()">+ Add Player</button>
+</div>
+
+<table class="data-table" id="players-table">
+    <thead>
+        <tr>
+            <th data-sort="name">Name</th>
+            <th data-sort="team">Team</th>
+            <th data-sort="pos">Pos</th>
+            <th data-sort="bye" data-type="number">Bye</th>
+            <th data-sort="adp" data-type="number">ADP</th>
+            <th data-sort="points" data-type="number">Proj Pts</th>
+            <th data-sort="vbd" data-type="number">VBD Score</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for player in players %}
+        <tr id="row-{{ loop.index }}"
+            data-name="{{ player.name }}"
+            data-team="{{ player.team }}"
+            data-pos="{{ player.position.value }}"
+            data-bye="{{ player.bye_week }}"
+            data-adp="{{ player.adp }}"
+            data-pass_yards="{{ player.projected_stats.pass_yards }}"
+            data-pass_tds="{{ player.projected_stats.pass_tds }}"
+            data-interceptions="{{ player.projected_stats.interceptions }}"
+            data-rush_yards="{{ player.projected_stats.rush_yards }}"
+            data-rush_tds="{{ player.projected_stats.rush_tds }}"
+            data-receptions="{{ player.projected_stats.receptions }}"
+            data-rec_yards="{{ player.projected_stats.rec_yards }}"
+            data-rec_tds="{{ player.projected_stats.rec_tds }}"
+            data-field_goals="{{ player.projected_stats.field_goals }}"
+            data-extra_points="{{ player.projected_stats.extra_points }}"
+            data-sacks="{{ player.projected_stats.sacks }}"
+            data-def_interceptions="{{ player.projected_stats.def_interceptions }}"
+            data-def_tds="{{ player.projected_stats.def_tds }}"
+            data-points_allowed_per_game="{{ player.projected_stats.points_allowed_per_game }}">
+            <td data-col="name">{{ player.name }}</td>
+            <td data-col="team">{{ player.team }}</td>
+            <td data-col="pos"><span class="pos-badge pos-{{ player.position.value|lower }}">{{ player.position.value }}</span></td>
+            <td data-col="bye">{{ player.bye_week }}</td>
+            <td data-col="adp">{{ player.adp }}</td>
+            <td data-col="points">{{ "%.1f"|format(player.fantasy_points) }}</td>
+            <td data-col="vbd">{{ "%.1f"|format(player.vbd_score) }}</td>
+            <td>
+                <button class="btn-secondary btn-small" onclick="editPlayer('{{ player.name }}')">Edit</button>
+                <button class="btn-secondary btn-small" onclick="deletePlayer('{{ player.name }}')">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Add/Edit Player Modal -->
+<div class="modal-overlay" id="player-modal">
+    <div class="modal-content">
+        <h2 id="modal-title">Add Player</h2>
+        <input type="hidden" id="modal-mode" value="add">
+        <input type="hidden" id="modal-original-name" value="">
+        <div class="form-grid">
+            <div>
+                <label>Name</label>
+                <input type="text" id="field-name" placeholder="Player name">
+            </div>
+            <div>
+                <label>Team</label>
+                <input type="text" id="field-team" placeholder="e.g. KC">
+            </div>
+            <div>
+                <label>Position</label>
+                <select id="field-position" onchange="updateStatFields()">
+                    <option value="QB">QB</option>
+                    <option value="RB">RB</option>
+                    <option value="WR">WR</option>
+                    <option value="TE">TE</option>
+                    <option value="K">K</option>
+                    <option value="DEF">DEF</option>
+                </select>
+            </div>
+            <div>
+                <label>Bye Week</label>
+                <input type="number" id="field-bye" value="0">
+            </div>
+            <div>
+                <label>ADP</label>
+                <input type="number" id="field-adp" value="200" step="0.1">
+            </div>
+        </div>
+
+        <h3 style="margin-top:1rem; margin-bottom:0.5rem;">Projected Stats</h3>
+
+        <!-- QB Stats -->
+        <div class="stat-fields" id="stats-QB">
+            <div class="form-grid">
+                <div><label>Pass Yards</label><input type="number" id="qb-pass_yards" value="0" step="1"></div>
+                <div><label>Pass TDs</label><input type="number" id="qb-pass_tds" value="0" step="1"></div>
+                <div><label>Interceptions</label><input type="number" id="qb-interceptions" value="0" step="1"></div>
+                <div><label>Rush Yards</label><input type="number" id="qb-rush_yards" value="0" step="1"></div>
+                <div><label>Rush TDs</label><input type="number" id="qb-rush_tds" value="0" step="1"></div>
+            </div>
+        </div>
+
+        <!-- RB Stats -->
+        <div class="stat-fields" id="stats-RB">
+            <div class="form-grid">
+                <div><label>Rush Yards</label><input type="number" id="rb-rush_yards" value="0" step="1"></div>
+                <div><label>Rush TDs</label><input type="number" id="rb-rush_tds" value="0" step="1"></div>
+                <div><label>Receptions</label><input type="number" id="rb-receptions" value="0" step="1"></div>
+                <div><label>Rec Yards</label><input type="number" id="rb-rec_yards" value="0" step="1"></div>
+                <div><label>Rec TDs</label><input type="number" id="rb-rec_tds" value="0" step="1"></div>
+            </div>
+        </div>
+
+        <!-- WR Stats -->
+        <div class="stat-fields" id="stats-WR">
+            <div class="form-grid">
+                <div><label>Receptions</label><input type="number" id="wr-receptions" value="0" step="1"></div>
+                <div><label>Rec Yards</label><input type="number" id="wr-rec_yards" value="0" step="1"></div>
+                <div><label>Rec TDs</label><input type="number" id="wr-rec_tds" value="0" step="1"></div>
+            </div>
+        </div>
+
+        <!-- TE Stats -->
+        <div class="stat-fields" id="stats-TE">
+            <div class="form-grid">
+                <div><label>Receptions</label><input type="number" id="te-receptions" value="0" step="1"></div>
+                <div><label>Rec Yards</label><input type="number" id="te-rec_yards" value="0" step="1"></div>
+                <div><label>Rec TDs</label><input type="number" id="te-rec_tds" value="0" step="1"></div>
+            </div>
+        </div>
+
+        <!-- K Stats -->
+        <div class="stat-fields" id="stats-K">
+            <div class="form-grid">
+                <div><label>Field Goals</label><input type="number" id="k-field_goals" value="0" step="1"></div>
+                <div><label>Extra Points</label><input type="number" id="k-extra_points" value="0" step="1"></div>
+            </div>
+        </div>
+
+        <!-- DEF Stats -->
+        <div class="stat-fields" id="stats-DEF">
+            <div class="form-grid">
+                <div><label>Sacks</label><input type="number" id="def-sacks" value="0" step="1"></div>
+                <div><label>Def Interceptions</label><input type="number" id="def-def_interceptions" value="0" step="1"></div>
+                <div><label>Def TDs</label><input type="number" id="def-def_tds" value="0" step="1"></div>
+                <div><label>Pts Allowed/Game</label><input type="number" id="def-points_allowed_per_game" value="0" step="0.1"></div>
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button class="btn-secondary" onclick="hideModal()">Cancel</button>
+            <button class="btn-primary" onclick="savePlayer()">Save</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    makeSortable("players-table");
+
+    const STAT_FIELDS = {
+        QB: ["pass_yards", "pass_tds", "interceptions", "rush_yards", "rush_tds"],
+        RB: ["rush_yards", "rush_tds", "receptions", "rec_yards", "rec_tds"],
+        WR: ["receptions", "rec_yards", "rec_tds"],
+        TE: ["receptions", "rec_yards", "rec_tds"],
+        K: ["field_goals", "extra_points"],
+        DEF: ["sacks", "def_interceptions", "def_tds", "points_allowed_per_game"],
+    };
+
+    function updateStatFields() {
+        document.querySelectorAll(".stat-fields").forEach(el => el.classList.remove("active"));
+        const pos = document.getElementById("field-position").value;
+        const section = document.getElementById("stats-" + pos);
+        if (section) section.classList.add("active");
+    }
+
+    function showAddModal() {
+        document.getElementById("modal-title").textContent = "Add Player";
+        document.getElementById("modal-mode").value = "add";
+        document.getElementById("modal-original-name").value = "";
+        document.getElementById("field-name").value = "";
+        document.getElementById("field-name").disabled = false;
+        document.getElementById("field-team").value = "";
+        document.getElementById("field-position").value = "QB";
+        document.getElementById("field-position").disabled = false;
+        document.getElementById("field-bye").value = "0";
+        document.getElementById("field-adp").value = "200";
+        // Reset all stat inputs
+        document.querySelectorAll(".stat-fields input").forEach(el => el.value = "0");
+        updateStatFields();
+        document.getElementById("player-modal").classList.add("active");
+    }
+
+    function hideModal() {
+        document.getElementById("player-modal").classList.remove("active");
+    }
+
+    function editPlayer(name) {
+        // Find the row with this player name
+        const row = document.querySelector(`tr[data-name="${CSS.escape(name)}"]`);
+        if (!row) return;
+
+        document.getElementById("modal-title").textContent = "Edit Player";
+        document.getElementById("modal-mode").value = "update";
+        document.getElementById("modal-original-name").value = name;
+        document.getElementById("field-name").value = name;
+        document.getElementById("field-name").disabled = true;
+        document.getElementById("field-team").value = row.dataset.team;
+        document.getElementById("field-position").value = row.dataset.pos;
+        document.getElementById("field-position").disabled = true;
+        document.getElementById("field-bye").value = row.dataset.bye;
+        document.getElementById("field-adp").value = row.dataset.adp;
+
+        // Fill stat fields for the position
+        const pos = row.dataset.pos;
+        const prefix = pos.toLowerCase();
+        const fields = STAT_FIELDS[pos] || [];
+        // Reset all first
+        document.querySelectorAll(".stat-fields input").forEach(el => el.value = "0");
+        fields.forEach(stat => {
+            const input = document.getElementById(prefix + "-" + stat);
+            if (input) input.value = row.dataset[stat] || "0";
+        });
+
+        updateStatFields();
+        document.getElementById("player-modal").classList.add("active");
+    }
+
+    function savePlayer() {
+        const mode = document.getElementById("modal-mode").value;
+        const pos = document.getElementById("field-position").value;
+        const prefix = pos.toLowerCase();
+        const fields = STAT_FIELDS[pos] || [];
+
+        const projected_stats = {};
+        fields.forEach(stat => {
+            const input = document.getElementById(prefix + "-" + stat);
+            if (input) projected_stats[stat] = parseFloat(input.value) || 0;
+        });
+
+        const payload = {
+            name: mode === "update" ? document.getElementById("modal-original-name").value : document.getElementById("field-name").value,
+            team: document.getElementById("field-team").value,
+            position: pos,
+            bye_week: parseInt(document.getElementById("field-bye").value) || 0,
+            adp: parseFloat(document.getElementById("field-adp").value) || 200,
+            projected_stats: projected_stats,
+        };
+
+        const url = mode === "update" ? "/api/players/update" : "/api/players/add";
+
+        postJSON(url, payload).then(res => {
+            if (res.status === "updated" || res.status === "added") {
+                location.reload();
+            } else {
+                alert("Error: " + JSON.stringify(res));
+            }
+        }).catch(err => alert("Request failed: " + err));
+    }
+
+    function deletePlayer(name) {
+        if (!confirm("Delete player \"" + name + "\"?")) return;
+        postJSON("/api/players/delete", { name: name }).then(res => {
+            if (res.status === "deleted") {
+                const row = document.querySelector(`tr[data-name="${CSS.escape(name)}"]`);
+                if (row) row.remove();
+            } else {
+                alert("Error: " + JSON.stringify(res));
+            }
+        }).catch(err => alert("Request failed: " + err));
+    }
+
+    function filterPlayers(text) {
+        filterTable("players-table", text);
+    }
+
+    // Initialize stat fields visibility
+    updateStatFields();
+</script>
+{% endblock %}

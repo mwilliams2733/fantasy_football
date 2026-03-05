@@ -552,5 +552,68 @@ def api_backtest_results():
     return jsonify({"files": sorted(files)})
 
 
+# --- Player Data ---
+
+@app.route("/players")
+def players_page():
+    """Player data management page."""
+    players = _load_and_prepare()
+    return render_template("players.html", players=players)
+
+
+@app.route("/api/players/update", methods=["POST"])
+def api_update_player():
+    """Update a player's stats."""
+    data = request.get_json()
+    players = load_players()
+    for p in players:
+        if p.name == data["name"]:
+            if "team" in data:
+                p.team = data["team"]
+            if "adp" in data:
+                p.adp = float(data["adp"])
+            if "bye_week" in data:
+                p.bye_week = int(data["bye_week"])
+            if "projected_stats" in data:
+                for k, v in data["projected_stats"].items():
+                    if hasattr(p.projected_stats, k):
+                        setattr(p.projected_stats, k, float(v))
+            break
+    save_players(players)
+    score_all_players(players)
+    calculate_vbd(players)
+    updated = next((p for p in players if p.name == data["name"]), None)
+    return jsonify({"status": "updated", "points": round(updated.fantasy_points, 1) if updated else 0, "vbd": round(updated.vbd_score, 1) if updated else 0})
+
+
+@app.route("/api/players/add", methods=["POST"])
+def api_add_player():
+    """Add a new player."""
+    data = request.get_json()
+    players = load_players()
+    from src.models import ProjectedStats, Player as PlayerModel
+    new_player = PlayerModel(
+        name=data["name"],
+        team=data["team"],
+        position=Position(data["position"]),
+        bye_week=int(data.get("bye_week", 0)),
+        projected_stats=ProjectedStats(**{k: float(v) for k, v in data.get("projected_stats", {}).items()}),
+        adp=float(data.get("adp", 200)),
+    )
+    players.append(new_player)
+    save_players(players)
+    return jsonify({"status": "added"})
+
+
+@app.route("/api/players/delete", methods=["POST"])
+def api_delete_player():
+    """Remove a player."""
+    data = request.get_json()
+    players = load_players()
+    players = [p for p in players if p.name != data["name"]]
+    save_players(players)
+    return jsonify({"status": "deleted"})
+
+
 if __name__ == "__main__":
     socketio.run(app, debug=True, port=5000)
