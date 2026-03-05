@@ -35,6 +35,11 @@
     <div id="draft-results" class="hidden">
         <div id="draft-board"></div>
         <div id="team-results" style="margin-top: 2rem;"></div>
+        <div id="save-league-section" style="margin-top: 1.5rem; display: flex; gap: 1rem; align-items: center;">
+            <input type="text" id="save-league-name" placeholder="League name" value="Mock Draft" style="max-width: 250px;">
+            <button class="btn-primary" onclick="saveLeague()">Save League</button>
+            <span id="save-status" class="text-secondary"></span>
+        </div>
     </div>
 </div>
 
@@ -99,6 +104,11 @@
     <!-- Results (shown after draft completes) -->
     <div id="interactive-results" class="hidden">
         <div id="int-team-results" style="margin-top: 2rem;"></div>
+        <div style="margin-top: 1.5rem; display: flex; gap: 1rem; align-items: center;">
+            <input type="text" id="int-save-league-name" placeholder="League name" value="Interactive Draft" style="max-width: 250px;">
+            <button class="btn-primary" onclick="saveLeague('int-save-league-name', 'int-save-status')">Save League</button>
+            <span id="int-save-status" class="text-secondary"></span>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -113,6 +123,26 @@ function showTab(tab) {
     document.querySelectorAll(".tab-group .tab").forEach((el, i) => {
         el.classList.toggle("active", (i === 0 && tab === "auto-sim") || (i === 1 && tab === "interactive"));
     });
+}
+
+function saveLeague(nameFieldId, statusFieldId) {
+    nameFieldId = nameFieldId || "save-league-name";
+    statusFieldId = statusFieldId || "save-status";
+    const name = document.getElementById(nameFieldId).value || "saved_league";
+    const statusEl = document.getElementById(statusFieldId);
+    statusEl.textContent = "Saving...";
+    postJSON("/api/saves", { name: name })
+        .then(data => {
+            if (data.error) {
+                statusEl.textContent = "Error: " + data.error;
+            } else {
+                statusEl.textContent = "Saved as " + data.filename;
+                statusEl.style.color = "#2ecc71";
+            }
+        })
+        .catch(err => {
+            statusEl.textContent = "Save failed: " + err.message;
+        });
 }
 </script>
 {% endblock %}

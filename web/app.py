@@ -129,6 +129,7 @@ def api_draft_auto_sim():
             ],
         })
     team_results.sort(key=lambda t: t["total_points"], reverse=True)
+    app.config["_last_league"] = league
     return jsonify({"picks": picks, "teams": team_results})
 
 
@@ -250,6 +251,7 @@ def _emit_draft_complete(sid):
             ],
         })
     teams.sort(key=lambda t: t["total_points"], reverse=True)
+    app.config["_last_league"] = league
     emit("draft_complete", {"teams": teams})
     del _active_drafts[sid]
 
@@ -559,6 +561,26 @@ def players_page():
     """Player data management page."""
     players = _load_and_prepare()
     return render_template("players.html", players=players)
+
+
+@app.route("/api/saves", methods=["GET"])
+def api_list_saves():
+    """List saved leagues."""
+    saves = list_saves()
+    return jsonify({"saves": saves})
+
+
+@app.route("/api/saves", methods=["POST"])
+def api_save_league():
+    """Save a league."""
+    data = request.get_json()
+    league_name = data.get("name", "saved_league")
+    # Get the last league from draft
+    league = app.config.get("_last_league")
+    if not league:
+        return jsonify({"error": "No active league to save"}), 400
+    filename = save_league(league, league_name)
+    return jsonify({"status": "saved", "filename": filename})
 
 
 @app.route("/api/players/update", methods=["POST"])
