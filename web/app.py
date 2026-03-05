@@ -637,5 +637,37 @@ def api_delete_player():
     return jsonify({"status": "deleted"})
 
 
+from src.matchup_optimizer import optimize_with_matchups, validate_roster_rules
+from src.data_scraper import scrape_schedule, scrape_defense_rankings
+
+
+@app.route("/api/team/matchup-optimize", methods=["POST"])
+def api_team_matchup_optimize():
+    """Run matchup-based lineup optimization."""
+    data = request.get_json()
+    league_file = data.get("league_file")
+    team_name = data.get("team_name")
+    week = int(data.get("week", 1))
+    year = int(data.get("year", 2024))
+
+    league = load_league(league_file)
+    for t in league.teams:
+        for e in t.roster:
+            calculate_fantasy_points(e.player)
+
+    team_obj = next((t for t in league.teams if t.name == team_name), None)
+    if not team_obj:
+        return jsonify({"error": "Team not found"}), 404
+
+    try:
+        schedule = scrape_schedule(year)
+        defense_rankings = scrape_defense_rankings(year)
+    except Exception as e:
+        return jsonify({"error": f"Failed to load matchup data: {str(e)}"}), 500
+
+    result = optimize_with_matchups(team_obj, week, schedule, defense_rankings)
+    return jsonify(result)
+
+
 if __name__ == "__main__":
     socketio.run(app, debug=True, port=5000)
