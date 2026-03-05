@@ -44,6 +44,20 @@ def index():
     return render_template("index.html", player_count=len(players), save_count=len(saves))
 
 
+@app.route("/rankings")
+def rankings():
+    """Player rankings with sortable, filterable table."""
+    players = _load_and_prepare()
+    position_filter = request.args.get("position", "ALL")
+    if position_filter != "ALL":
+        players = [p for p in players if p.position.value == position_filter]
+    players.sort(key=lambda p: p.vbd_score, reverse=True)
+    return render_template("rankings.html",
+                           players=players,
+                           active_filter=position_filter,
+                           positions=["ALL", "QB", "RB", "WR", "TE", "K", "DEF"])
+
+
 @app.context_processor
 def inject_pos_colors():
     return {"pos_colors": POS_COLORS}

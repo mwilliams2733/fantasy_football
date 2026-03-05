@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% set active_page = "rankings" %}
+
+{% block title %}Player Rankings — Fantasy Football Draft Tool{% endblock %}
+
+{% block content %}
+<h1>Player Rankings</h1>
+
+<div class="tab-group">
+    {% for pos in positions %}
+    <a href="?position={{ pos }}" class="{% if active_filter == pos %}active{% endif %}">{{ pos }}</a>
+    {% endfor %}
+</div>
+
+<input type="text" placeholder="Search players..." onkeyup="filterTable('rankings-table', this.value)" class="search-input">
+
+<table class="data-table" id="rankings-table">
+    <thead>
+        <tr>
+            <th data-sort="rank" data-type="number">Rank</th>
+            <th data-sort="name">Name</th>
+            <th data-sort="team">Team</th>
+            <th data-sort="pos">Pos</th>
+            <th data-sort="points" data-type="number">Projected Pts</th>
+            <th data-sort="vbd" data-type="number">VBD Score</th>
+            <th data-sort="adp" data-type="number">ADP</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for player in players %}
+        <tr>
+            <td data-col="rank">{{ loop.index }}</td>
+            <td data-col="name">{{ player.name }}</td>
+            <td data-col="team">{{ player.team }}</td>
+            <td data-col="pos"><span class="pos-badge pos-{{ player.position.value|lower }}">{{ player.position.value }}</span></td>
+            <td data-col="points">{{ "%.1f"|format(player.fantasy_points) }}</td>
+            <td data-col="vbd">{{ "%.1f"|format(player.vbd_score) }}</td>
+            <td data-col="adp">{{ player.adp }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    makeSortable("rankings-table");
+</script>
+{% endblock %}
