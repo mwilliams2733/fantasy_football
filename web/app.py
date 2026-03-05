@@ -15,6 +15,9 @@ from src.scoring import score_all_players
 from src.rankings import calculate_vbd, get_best_available_by_position, get_draft_recommendations
 from src.persistence import load_players, save_players, list_saves, load_league, save_league
 from src.draft import DraftEngine
+from src.team_manager import optimize_lineup, evaluate_trade
+from src.waiver import get_waiver_recommendations
+from src.scoring import calculate_fantasy_points
 
 app = Flask(__name__)
 app.secret_key = "fantasy-football-local"
@@ -330,6 +333,105 @@ def api_live_draft_reset():
     """Reset the live draft player pool."""
     app.config.pop("_live_draft_players", None)
     return jsonify({"status": "reset"})
+
+
+# --- Team Manager ---
+
+@app.route("/team")
+def team():
+    """Team manager page."""
+    saves = list_saves()
+    return render_template("team.html", saves=saves)
+
+
+@app.route("/api/team/roster", methods=["POST"])
+def api_team_roster():
+    """Get a team's roster from a saved league."""
+    data = request.get_json()
+    league_file = data.get("league_file")
+    team_name = data.get("team_name")
+    league = load_league(league_file)
+    # Score players
+    for t in league.teams:
+        for e in t.roster:
+            calculate_fantasy_points(e.player)
+    # If team_name is a placeholder, just return team list
+    team_obj = next((t for t in league.teams if t.name == team_name), None)
+    team_names = [t.name for t in league.teams]
+    if not team_obj:
+        return jsonify({"error": "Team not found", "teams": team_names}), 404
+    starters = team_obj.starters()
+    starter_pts = sum(e.player.fantasy_points for e in starters)
+    return jsonify({
+        "team_name": team_obj.name,
+        "roster": [
+            {"player": e.player.name, "team": e.player.team, "position": e.player.position.value,
+             "slot": e.slot.value, "points": round(e.player.fantasy_points, 1),
+             "vbd": round(e.player.vbd_score, 1)}
+            for e in team_obj.roster
+        ],
+        "starter_points": round(starter_pts, 1),
+        "teams": team_names,
+    })
+
+
+@app.route("/api/team/optimize", methods=["POST"])
+def api_team_optimize():
+    """Optimize a team's lineup."""
+    data = request.get_json()
+    league_file = data.get("league_file")
+    team_name = data.get("team_name")
+    league = load_league(league_file)
+    for t in league.teams:
+        for e in t.roster:
+            calculate_fantasy_points(e.player)
+    team_obj = next((t for t in league.teams if t.name == team_name), None)
+    if not team_obj:
+        return jsonify({"error": "Team not found"}), 404
+    new_lineup = optimize_lineup(team_obj)
+    team_obj.roster = new_lineup
+    save_league(league, league_file)
+    starters = team_obj.starters()
+    starter_pts = sum(e.player.fantasy_points for e in starters)
+    return jsonify({
+        "roster": [
+            {"player": e.player.name, "team": e.player.team, "position": e.player.position.value,
+             "slot": e.slot.value, "points": round(e.player.fantasy_points, 1),
+             "vbd": round(e.player.vbd_score, 1)}
+            for e in team_obj.roster
+        ],
+        "starter_points": round(starter_pts, 1),
+    })
+
+
+@app.route("/api/team/waivers", methods=["POST"])
+def api_team_waivers():
+    """Get waiver recommendations for a team."""
+    data = request.get_json()
+    league_file = data.get("league_file")
+    team_name = data.get("team_name")
+    league = load_league(league_file)
+    for t in league.teams:
+        for e in t.roster:
+            calculate_fantasy_points(e.player)
+    # Also score free agents
+    if league.available_players:
+        score_all_players(league.available_players)
+        calculate_vbd(league.available_players)
+    team_obj = next((t for t in league.teams if t.name == team_name), None)
+    if not team_obj:
+        return jsonify({"error": "Team not found"}), 404
+    recs = get_waiver_recommendations(league, team_obj)
+    return jsonify({
+        "recommendations": [
+            {"add": r["add"].name, "add_pos": r["add"].position.value,
+             "add_pts": round(r["add"].fantasy_points, 1),
+             "drop": r["drop"].name, "drop_pos": r["drop"].position.value,
+             "drop_pts": round(r["drop"].fantasy_points, 1),
+             "reason": r["reason"]}
+            for r in recs
+        ]
+    })
 
 
 if __name__ == "__main__":

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% set active_page = "team" %}
+
+{% block title %}Team Manager — Fantasy Football Draft Tool{% endblock %}
+
+{% block content %}
+<h1>Team Manager</h1>
+<p class="text-secondary">Load a saved league, view rosters, optimize lineups, and get waiver recommendations.</p>
+
+<!-- League/Team Selector -->
+<div class="card" style="margin-bottom: 1.5rem;">
+    <h3>Select League &amp; Team</h3>
+    <div style="display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <label for="league-select">Saved League</label>
+            <select id="league-select" class="search-input" onchange="onLeagueChange()">
+                <option value="">-- Select a league --</option>
+                {% for s in saves %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+            <label for="team-select">Team</label>
+            <select id="team-select" class="search-input" disabled>
+                <option value="">-- Select a team --</option>
+            </select>
+        </div>
+        <div>
+            <button class="btn-primary" onclick="loadTeam()">Load Team</button>
+        </div>
+    </div>
+</div>
+
+<!-- Roster Section (hidden until loaded) -->
+<div id="roster-section" class="hidden">
+    <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;">
+        <h2 id="team-title" style="margin: 0;"></h2>
+        <div id="starter-points" style="font-size: 1.25rem; font-weight: bold; color: var(--accent);"></div>
+    </div>
+
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">Roster</h3>
+            <button class="btn-primary" onclick="optimizeLineup()">Optimize Lineup</button>
+        </div>
+        <div style="overflow-x: auto;">
+            <table class="data-table" id="roster-table">
+                <thead>
+                    <tr>
+                        <th>Slot</th>
+                        <th>Pos</th>
+                        <th>Player</th>
+                        <th>Team</th>
+                        <th>Pts</th>
+                        <th>VBD</th>
+                    </tr>
+                </thead>
+                <tbody id="roster-body"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Waiver Recommendations -->
+    <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+            <h3 style="margin: 0;">Waiver Wire Recommendations</h3>
+            <button class="btn-secondary" onclick="getWaivers()">Get Recommendations</button>
+        </div>
+        <div id="waiver-results">
+            <p class="text-secondary">Click "Get Recommendations" to find waiver wire upgrades.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let currentLeagueFile = '';
+    let currentTeamName = '';
+
+    function onLeagueChange() {
+        const leagueFile = document.getElementById('league-select').value;
+        const teamSelect = document.getElementById('team-select');
+        if (!leagueFile) {
+            teamSelect.disabled = true;
+            teamSelect.innerHTML = '<option value="">-- Select a team --</option>';
+            return;
+        }
+        // Load team names by fetching roster for a dummy team to get the teams list
+        teamSelect.disabled = true;
+        teamSelect.innerHTML = '<option value="">Loading...</option>';
+        postJSON('/api/team/roster', { league_file: leagueFile, team_name: '__list__' })
+            .then(data => {
+                // Even if team not found, the endpoint won't return teams list
+                // So we use a dedicated approach: just try loading with first available
+                teamSelect.innerHTML = '<option value="">-- Select a team --</option>';
+                if (data.teams) {
+                    data.teams.forEach(name => {
+                        const opt = document.createElement('option');
+                        opt.value = name;
+                        opt.textContent = name;
+                        teamSelect.appendChild(opt);
+                    });
+                }
+                teamSelect.disabled = false;
+            })
+            .catch(() => {
+                teamSelect.innerHTML = '<option value="">Error loading teams</option>';
+            });
+    }
+
+    function loadTeam() {
+        const leagueFile = document.getElementById('league-select').value;
+        const teamName = document.getElementById('team-select').value;
+        if (!leagueFile || !teamName) {
+            alert('Please select both a league and a team.');
+            return;
+        }
+        currentLeagueFile = leagueFile;
+        currentTeamName = teamName;
+        showLoading('roster-body');
+        postJSON('/api/team/roster', { league_file: leagueFile, team_name: teamName })
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                renderRoster(data.roster, data.starter_points, data.team_name);
+                document.getElementById('roster-section').classList.remove('hidden');
+                // Reset waiver results
+                document.getElementById('waiver-results').innerHTML =
+                    '<p class="text-secondary">Click "Get Recommendations" to find waiver wire upgrades.</p>';
+            });
+    }
+
+    function renderRoster(roster, starterPts, teamName) {
+        document.getElementById('team-title').textContent = teamName;
+        document.getElementById('starter-points').textContent = 'Starter Points: ' + starterPts;
+        const tbody = document.getElementById('roster-body');
+        let html = '';
+        roster.forEach(entry => {
+            const isBench = entry.slot === 'BENCH';
+            const rowClass = isBench ? 'style="opacity: 0.6;"' : '';
+            html += `<tr ${rowClass}>
+                <td><strong>${entry.slot}</strong></td>
+                <td><span class="pos-badge pos-${entry.position.toLowerCase()}">${entry.position}</span></td>
+                <td>${entry.player}</td>
+                <td>${entry.team}</td>
+                <td>${entry.points}</td>
+                <td>${entry.vbd}</td>
+            </tr>`;
+        });
+        tbody.innerHTML = html;
+    }
+
+    function optimizeLineup() {
+        if (!currentLeagueFile || !currentTeamName) return;
+        showLoading('roster-body');
+        postJSON('/api/team/optimize', { league_file: currentLeagueFile, team_name: currentTeamName })
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+                renderRoster(data.roster, data.starter_points, currentTeamName);
+            });
+    }
+
+    function getWaivers() {
+        if (!currentLeagueFile || !currentTeamName) return;
+        const container = document.getElementById('waiver-results');
+        container.innerHTML = '<div class="loading-spinner"></div>';
+        postJSON('/api/team/waivers', { league_file: currentLeagueFile, team_name: currentTeamName })
+            .then(data => {
+                if (data.error) {
+                    container.innerHTML = `<p class="text-secondary">${data.error}</p>`;
+                    return;
+                }
+                renderWaivers(data.recommendations);
+            });
+    }
+
+    function renderWaivers(recs) {
+        const container = document.getElementById('waiver-results');
+        if (!recs || recs.length === 0) {
+            container.innerHTML = '<p class="text-secondary">No waiver recommendations found. Your roster is solid!</p>';
+            return;
+        }
+        let html = '';
+        recs.forEach(r => {
+            html += `<div class="card" style="margin-bottom: 0.75rem; padding: 0.75rem 1rem; border-left: 3px solid var(--accent);">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                    <div>
+                        <span style="color: #2ecc71; font-weight: bold;">+ ${r.add}</span>
+                        <span class="pos-badge pos-${r.add_pos.toLowerCase()}" style="margin-left: 0.25rem;">${r.add_pos}</span>
+                        <span class="text-secondary" style="margin-left: 0.5rem;">${r.add_pts} pts</span>
+                    </div>
+                    <div>
+                        <span style="color: #e74c3c; font-weight: bold;">- ${r.drop}</span>
+                        <span class="pos-badge pos-${r.drop_pos.toLowerCase()}" style="margin-left: 0.25rem;">${r.drop_pos}</span>
+                        <span class="text-secondary" style="margin-left: 0.5rem;">${r.drop_pts} pts</span>
+                    </div>
+                </div>
+                <div class="text-secondary" style="margin-top: 0.25rem; font-size: 0.85rem;">${r.reason}</div>
+            </div>`;
+        });
+        container.innerHTML = html;
+    }
+</script>
+{% endblock %}
